@@ -104,6 +104,38 @@ CRITICAL INSTRUCTIONS:
 
 IMPORTANT: You are speaking out loud in a live conversation. Be natural, conversational, and psychologically realistic."""
 
+    # generates opponent's opening message to start the negotiation
+    def get_opening_message(self) -> str:
+        opening_prompt = f"""Generate your opening line to start this negotiation. You are {self.name}.
+
+            This is the very first thing you say when the other party walks in or the meeting begins.
+            - Greet them appropriately for the relationship and setting
+            - Set the tone based on your personality
+            - You may hint at the agenda or your initial position, but don't dive into specifics yet
+            - Keep it natural and brief (1-2 sentences)
+
+            Remember: This is spoken dialogue. Be warm, professional, or direct based on your character.
+        """
+
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": opening_prompt}
+        ]
+
+        response = self.client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+            temperature=0.85,
+            max_tokens=150,
+        )
+
+        opening_message = response.choices[0].message.content or ""
+
+        # Add to transcript as assistant's first message
+        self.transcript.append({"role": "assistant", "content": opening_message})
+
+        return opening_message
+
     def get_response(self, user_message: str) -> str:
         """
         Generates opponent's response to user's message

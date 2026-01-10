@@ -46,10 +46,20 @@ def generate_scenario(context: str) -> Dict:
         "briefing": scenario["user_briefing"]
     }
 
+    # Build a nicely formatted description for frontend display
+    description = _build_display_description(
+        scenario.get("user_narrative", ""),
+        scenario.get("user_briefing", {}),
+        scenario.get("scenario_metadata", {})
+    )
+
     return {
         "scenario_id": scenario.get("scenario_id"),
         "scenario_title": scenario.get("scenario_title"),
         "user_narrative": scenario.get("user_narrative"),
+        "description": description,
+        "title": scenario.get("scenario_title"),
+        "role": scenario.get("user_briefing", {}).get("role_name", "Negotiator"),
         "user_briefing": user_briefing,
         "opponent_agent_config": opponent_agent_config,
         "coach_agent_config": coach_agent_config,
@@ -213,6 +223,43 @@ def _format_list(items: list) -> str:
     if not items:
         return "None specified"
     return "\n".join(f"- {item}" for item in items)
+
+
+def _build_display_description(narrative: str, user_briefing: Dict, metadata: Dict) -> str:
+    """
+    Build a nicely formatted description paragraph for frontend display.
+    Combines the immersive narrative with key context for a polished user experience.
+    """
+    # Start with the narrative if available (this is the immersive 3-4 paragraph briefing)
+    if narrative:
+        return narrative
+
+    # Fallback: build a description from available data
+    role = user_briefing.get("role_name", "Negotiator")
+    role_desc = user_briefing.get("role_description", "")
+    objectives = user_briefing.get("objectives", {})
+    primary_goal = objectives.get("primary", "")
+    difficulty = metadata.get("difficulty", "intermediate")
+    domain = metadata.get("domain", "business")
+    skills = metadata.get("key_skills_tested", [])
+
+    parts = []
+
+    if role_desc:
+        parts.append(role_desc)
+
+    if primary_goal:
+        parts.append(f"Your primary objective is to {primary_goal.lower()}.")
+
+    if skills:
+        skills_text = ", ".join(skills[:3])
+        parts.append(f"This {difficulty} {domain} scenario will test your skills in {skills_text}.")
+
+    if parts:
+        return " ".join(parts)
+
+    # Ultimate fallback
+    return f"A {difficulty} negotiation scenario where you play the role of {role}."
 
 # parses json from LLM responses
 def _parse_json_response(response_text: str) -> Dict:

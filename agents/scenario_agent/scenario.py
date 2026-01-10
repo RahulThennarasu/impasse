@@ -5,7 +5,7 @@ from typing import Dict
 
 from agents.scenario_agent.scenario_prompt import create_prompt
 
-# generates negotiation scenario and returns outputs for user and opponent
+# generates negotiation scenario and returns outputs for user, opponent, and coach
 def generate_scenario(context: str) -> Dict:
     client = genai.Client()
     prompt = create_prompt(context)
@@ -23,6 +23,13 @@ def generate_scenario(context: str) -> Dict:
         scenario["opponent_briefing"]
     )
 
+    # Transform user data into format CoachAgent expects
+    coach_agent_config = _build_coach_config(
+        scenario["shared_context"],
+        scenario["user_briefing"],
+        scenario["opponent_briefing"]
+    )
+
     user_briefing = {
         "shared_context": scenario["shared_context"],
         "briefing": scenario["user_briefing"]
@@ -34,6 +41,7 @@ def generate_scenario(context: str) -> Dict:
         "user_narrative": scenario.get("user_narrative"),
         "user_briefing": user_briefing,
         "opponent_agent_config": opponent_agent_config,
+        "coach_agent_config": coach_agent_config,
         "scenario_metadata": scenario.get("scenario_metadata")
     }
 
@@ -117,6 +125,77 @@ def _build_opponent_config(shared_context: Dict, opponent_briefing: Dict) -> Dic
         "negotiables": opponent_briefing.get("negotiables", []),
         "role_description": opponent_briefing.get("role_description", ""),
     }
+
+# transforms scenario data into flat format for CoachAgent
+def _build_coach_config(shared_context: Dict, user_briefing: Dict, opponent_briefing: Dict) -> Dict:
+    """
+    CoachAgent expects:
+    - user_objectives: What you're trying to achieve
+    - user_batna: Your walkaway alternative
+    - points_of_tension: Known conflicts
+    - negotiable_items: What's on the table
+    - success_criteria: What defines a good outcome
+    - info_asymmetries: What you know vs. what they know
+    """
+    # Build user objectives string
+    user_objectives = user_briefing.get("objectives", {})
+    objectives_str = f"""Primary: {user_objectives.get('primary', '')}
+
+Secondary Goals:
+{_format_list(user_objectives.get('secondary', []))}
+
+Underlying Interests:
+{_format_list(user_objectives.get('underlying_interests', []))}"""
+
+    # Build user BATNA string
+    user_batna = user_briefing.get("batna", {})
+    batna_str = f"""{user_batna.get('description', '')}
+Strength: {user_batna.get('strength', 'unknown')}
+Downsides of walking away:
+{_format_list(user_batna.get('downsides', []))}"""
+
+    # Build points of tension from both perspectives
+    # Combine user constraints, non-negotiables, and general stakes
+    user_constraints = user_briefing.get("constraints", [])
+    user_non_negotiables = user_briefing.get("non_negotiables", [])
+    opponent_non_negotiables = opponent_briefing.get("non_negotiables", [])
+
+    tensions = []
+    tensions.append(f"Stakes: {shared_context.get('stakes', '')}")
+    tensions.append(f"\nUser's constraints:\n{_format_list(user_constraints)}")
+    tensions.append(f"\nUser's non-negotiables:\n{_format_list(user_non_negotiables)}")
+    tensions.append(f"\nOpponent's likely non-negotiables:\n{_format_list(opponent_non_negotiables)}")
+    tensions_str = "\n".join(tensions)
+
+    # Build negotiable items (user's perspective)
+    negotiables = user_briefing.get("negotiables", [])
+    negotiables_str = _format_list(negotiables)
+
+    # Build success criteria
+    success = user_briefing.get("success_criteria", {})
+    success_str = f"""Good outcome: {success.get('good_outcome', '')}
+Great outcome: {success.get('great_outcome', '')}"""
+
+    # Build information asymmetries from user's perspective
+    # What user knows privately + what user doesn't know about opponent
+    user_private = user_briefing.get("private_information", [])
+    opponent_private = opponent_briefing.get("private_information", [])
+
+    asymmetries_str = f"""What YOU know that they don't:
+{_format_list(user_private)}
+
+What THEY likely know that you don't:
+{_format_list(opponent_private)}"""
+
+    return {
+        "user_objectives": objectives_str,
+        "user_batna": batna_str,
+        "points_of_tension": tensions_str,
+        "negotiable_items": negotiables_str,
+        "success_criteria": success_str,
+        "info_asymmetries": asymmetries_str,
+    }
+
 
 # formats a list as bullet points
 def _format_list(items: list) -> str:

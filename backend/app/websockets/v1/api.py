@@ -175,4 +175,19 @@ async def get_session_info(session_id: str):
         "status": "active"
     }
 
+@api_router.post("/video/session/{session_id}/scenario_info")
+async def update_scenario_info(session_id: str, scenario_info: str):
+    """Update scenario information for a video call session"""
+    session = call_manager.get_session(session_id)
+    if not session:
+        return {"error": "Session not found", "session_id": session_id}
+    
+    session["scenario_info"] = scenario_info
+    logger.info(f"Session {session_id}: Scenario info updated")
+    
+    return {
+        "session_id": session_id,
+        "scenario_info": scenario_info,
+        "message": "Scenario information updated successfully"
+    }
 

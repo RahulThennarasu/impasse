@@ -12,7 +12,7 @@ def create_prompt(context: str) -> str:
         EXAMPLE 1
         ====================
         INPUT (User-provided details string):
-        "Negotiation type: Salary negotiation. Industry: Technology. User role: Senior Software Engineer. Counterparty: Engineering Manager. Context: Promotion discussion. Company: mid-sized SaaS. Timing: annual review in 2 weeks. User priority: higher base + equity. Manager constraint: salary bands + headcount budget."
+        "salary negotiation, technology, senior software engineer, engineering manager, promotion discussion, mid-sized SaaS, annual review in 2 weeks, higher base + equity, salary bands + headcount budget."
 
         OUTPUT (Scenario):
         Context and Background:
@@ -47,7 +47,7 @@ def create_prompt(context: str) -> str:
         EXAMPLE 2
         ====================
         INPUT (User-provided details string):
-        "Negotiation type: Vendor contract renewal. Industry: Healthcare. User role: Procurement Director. Counterparty: Medical equipment supplier rep. Context: multi-year imaging equipment + maintenance renewal. Contract expires in 30 days. Hospital needs cost reduction. Supplier wants longer term + margin protection. Switching costs: retraining."
+        "vendor contract renewal, healthcare, procurement director, medical equipment supplier rep, multi-year imaging equipment + maintenance renewal, contract expires in 30 days, hospital needs cost reduction, supplier wants longer term + margin protection, switching costs: retraining."
 
         OUTPUT (Scenario):
         Context and Background:

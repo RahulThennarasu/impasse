@@ -73,7 +73,7 @@ export function NegotiationClient() {
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [sessionTime, setSessionTime] = useState(0);
+  const [sessionTime] = useState(754);
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [testAudioOn, setTestAudioOn] = useState(false);
@@ -124,26 +124,6 @@ export function NegotiationClient() {
         if (videoRef.current) {
           videoRef.current.srcObject = mediaStream;
         }
-
-        // Start recording
-        const mediaRecorder = new MediaRecorder(mediaStream, {
-          mimeType: "video/webm;codecs=vp9,opus",
-        });
-        mediaRecorderRef.current = mediaRecorder;
-        recordedChunksRef.current = [];
-
-        mediaRecorder.ondataavailable = (event) => {
-          if (event.data.size > 0) {
-            recordedChunksRef.current.push(event.data);
-          }
-        };
-
-        mediaRecorder.onstop = () => {
-          const blob = new Blob(recordedChunksRef.current, { type: "video/webm" });
-          setRecordedBlob(blob);
-        };
-
-        mediaRecorder.start(1000); // Collect data every second
       } catch (error) {
         setMediaError("Unable to access camera or microphone.");
       }
@@ -153,22 +133,11 @@ export function NegotiationClient() {
 
     return () => {
       active = false;
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-        mediaRecorderRef.current.stop();
-      }
       setStream((current) => {
         current?.getTracks().forEach((track) => track.stop());
         return null;
       });
     };
-  }, []);
-
-  // Session timer
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setSessionTime((prev) => prev + 1);
-    }, 1000);
-    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -421,28 +390,6 @@ export function NegotiationClient() {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
-  const handleEndSession = useCallback(() => {
-    // Stop recording and trigger the onstop handler
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
-    }
-    // Show the upload modal
-    setIsUploadModalOpen(true);
-  }, []);
-
-  const handleUpload = useCallback(async () => {
-    if (!recordedBlob) {
-      throw new Error("No recording available");
-    }
-    await uploadNegotiationVideo(sessionIdRef.current, recordedBlob);
-  }, [recordedBlob]);
-
-  const handleNavigateToPostMortem = useCallback(() => {
-    // Stop all tracks
-    stream?.getTracks().forEach((track) => track.stop());
-    router.push("/postmortem/current-session");
-  }, [router, stream]);
-
   const headerTitle = scenario?.title ?? "Negotiation Session";
   const headerSubtitle = scenario
     ? `Role: ${scenario.role} • ${scenario.description}`
@@ -529,14 +476,6 @@ export function NegotiationClient() {
           onEndSession={handleEndSession}
         />
       </main>
-
-      <UploadModal
-        isOpen={isUploadModalOpen}
-        onClose={handleNavigateToPostMortem}
-        onConfirmUpload={handleUpload}
-        onSkip={handleNavigateToPostMortem}
-        sessionDuration={formatTime(sessionTime)}
-      />
     </div>
   );
 }

@@ -50,13 +50,13 @@ export function OpponentOrb({
 
   const particles = useMemo<Particle[]>(
     () =>
-      Array.from({ length: 64 }).map((_, index) => {
+      Array.from({ length: 48 }).map((_, index) => {
         const rng = seededRandom(index + 1);
         const angle = rng() * Math.PI * 2;
-        const radius = Math.sqrt(rng()) * 38;
+        const radius = Math.sqrt(rng()) * 32;
         return {
           id: index,
-          size: 5 + (index % 4) * 2,
+          size: 3 + (index % 3) * 2,
           x: Math.cos(angle) * radius,
           y: Math.sin(angle) * radius,
           dx: rng() * 2 - 1,
@@ -121,17 +121,20 @@ export function OpponentOrb({
               Math.sin(phase + particle.p1) * particle.dx * 1.8 * speedBoost;
             const swirlY =
               Math.cos(phase + particle.p1) * particle.dy * 1.8 * speedBoost;
-            const expansion = 0.85 + activeLevel * 0.55;
+            const expansion = 0.7 + activeLevel * 0.55;
+            const sizeBoost = 1 + activeLevel * 0.9;
             const x = (particle.x + flowX + swirlX * 0.45) * expansion;
             const y = (particle.y + flowY + swirlY * 0.45) * expansion;
+            const opacity = 0.4 + activeLevel * 0.6;
             return (
               <div
                 key={particle.id}
                 className="absolute left-1/2 top-1/2 rounded-full bg-[#c5e5b4]"
                 style={{
-                  width: particle.size,
-                  height: particle.size,
+                  width: particle.size * sizeBoost,
+                  height: particle.size * sizeBoost,
                   transform: `translate(-50%, -50%) translate(${x}px, ${y}px)`,
+                  opacity,
                 }}
               />
             );

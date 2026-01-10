@@ -29,6 +29,8 @@ You MUST output valid JSON matching this exact structure. Do not include any tex
     "stakes": "<what's at stake for both parties in general terms>"
   }},
 
+  "user_narrative": "<A 3-4 paragraph immersive briefing written in second person that the user reads before starting. Should set the scene, establish their role and stakes, hint at their leverage and constraints, and end with what's about to happen. Written like a mission briefing—engaging and clear, without revealing opponent's private information or giving tactical advice.>",
+
   "user_briefing": {{
     "role_name": "<the user's role/title>",
     "role_description": "<2-3 sentences describing who the user is in this scenario>",
@@ -111,6 +113,8 @@ OUTPUT:
     "setting": "A scheduled 1:1 meeting in a private conference room. The manager requested the meeting to 'discuss your career progression and the upcoming review cycle.'",
     "stakes": "For the engineer: compensation that reflects expanded responsibilities and market value. For the manager: retaining a key contributor while managing team budget and equity concerns."
   }},
+
+  "user_narrative": "You've been at this company for three years now, and you've earned your reputation. When the legacy payment system threatened to derail the product roadmap, you were the one who figured it out. When the team needed someone to lead the microservices migration, you stepped up. Your manager knows it, your teammates know it, and according to your last performance review, leadership knows it too.\n\nBut here's the thing: your compensation hasn't kept pace. You're still making $158K while recruiters are dangling offers north of $190K. Last week, a competitor made it official with a soft offer at $195K. You haven't told anyone at work yet, but you're not bluffing—you'd seriously consider taking it if this conversation doesn't go well.\n\nThe annual review cycle closes in two weeks. Your manager, Jordan, scheduled this meeting to discuss 'your career progression and the upcoming review cycle.' You've heard rumors about budget constraints and salary bands, but you also know you have leverage: you're the only person who truly understands the payment integration, and replacing you would set the team back months.\n\nYou're about to walk into that conference room. Jordan has been a good manager—supportive, fair, someone you respect. You don't want to damage that relationship, but you also can't accept another year of being underpaid. It's time to have the conversation you've been putting off.",
 
   "user_briefing": {{
     "role_name": "Senior Software Engineer",
@@ -293,6 +297,8 @@ OUTPUT:
     "setting": "A formal negotiation meeting in the hospital's administrative conference room. Both parties have prepared extensively. This is the second negotiation session—the first ended without agreement.",
     "stakes": "For the hospital: managing costs while maintaining quality patient care and equipment uptime. For the supplier: retaining a significant account while protecting margins and avoiding precedent-setting discounts."
   }},
+
+  "user_narrative": "The CFO's directive was clear: 8-12% cost reduction across all major vendor contracts. No exceptions. With CMS reimbursement cuts squeezing margins and labor costs climbing, Regional Health Partners needs to find savings wherever it can—and your desk is where those savings get found.\n\nThe MedImage contract is one of the big ones. Seven years of partnership, three hospitals worth of MRI machines, CT scanners, and X-ray equipment, plus the maintenance agreements that keep them running. The current deal expires in 30 days, and Patricia Chen from MedImage is already in the building for your second negotiation session. The first one ended with polite smiles and zero progress.\n\nYou've done your homework. You know switching vendors would cost roughly $400K in retraining and workflow disruption—but you also know MedImage has been losing hospital accounts to GE lately. You've had preliminary conversations with GE, though nothing formal. Your radiology chiefs prefer MedImage, but they've privately told you they'd adapt if the savings were significant enough. The CFO would accept 6% if you can get better SLAs.\n\nPatricia is good at her job. She's built relationships with your clinical staff over seven years, and she'll use them. She'll cite supply chain costs, push for a longer contract term, try to bundle in the equipment replacements you need next year. Your job is to get real concessions without blowing up a partnership that, despite everything, has worked reasonably well. The conference room is ready. Time to find out what MedImage is actually willing to do to keep your business.",
 
   "user_briefing": {{
     "role_name": "Director of Procurement",
@@ -479,6 +485,7 @@ You MUST:
 - Include meaningful information asymmetries—each party should have private knowledge
 - Make the scenario challenging but fair—neither party should have an obviously dominant position
 - Ensure the opponent_briefing contains enough detail for an AI to realistically role-play the character
+- Write a compelling user_narrative (3-4 paragraphs) that immerses the user in their role—make it feel like a mission briefing, not a dry summary
 - If the INPUT is vague, make realistic assumptions (do not ask questions)
 
 You MUST NOT:

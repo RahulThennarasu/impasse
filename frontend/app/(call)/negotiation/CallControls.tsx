@@ -8,6 +8,7 @@ type CallControlsProps = {
   onMutedChange: (value: boolean) => void;
   isVideoOff: boolean;
   onVideoChange: (value: boolean) => void;
+  onEndSession: () => void;
 };
 
 export function CallControls({
@@ -15,6 +16,7 @@ export function CallControls({
   onMutedChange,
   isVideoOff,
   onVideoChange,
+  onEndSession,
 }: CallControlsProps) {
   return (
     <div className="absolute bottom-0 left-0 right-0 flex justify-center bg-gradient-to-t from-black/80 via-black/40 to-transparent px-6 py-8">
@@ -23,7 +25,7 @@ export function CallControls({
           checked={!isMuted}
           onChange={() => onMutedChange(!isMuted)}
           className={`flex h-14 w-14 items-center justify-center rounded-full border transition cursor-pointer ${
-            isMuted ? "bg-[#ef4444] border-transparent" : "bg-white/15 border-white/20 hover:bg-white/25"
+            isMuted ? "bg-danger border-transparent" : "bg-white/15 border-white/20 hover:bg-white/25"
           }`}
         >
           <span className="sr-only">Toggle microphone</span>
@@ -34,7 +36,7 @@ export function CallControls({
           onChange={() => onVideoChange(!isVideoOff)}
           className={`flex h-14 w-14 items-center justify-center rounded-full border transition cursor-pointer ${
             isVideoOff
-              ? "bg-[#ef4444] border-transparent"
+              ? "bg-danger border-transparent"
               : "bg-white/15 border-white/20 hover:bg-white/25"
           }`}
         >
@@ -55,7 +57,8 @@ export function CallControls({
         </Button>
         <Button
           type="button"
-          className="flex h-14 w-14 items-center justify-center rounded-full bg-[#ef4444] text-white shadow-[0_4px_16px_rgba(239,68,68,0.4)] transition hover:bg-[#dc2626] cursor-pointer"
+          onClick={onEndSession}
+          className="flex h-14 w-14 items-center justify-center rounded-full bg-danger text-white shadow-danger-glow transition hover-bg-danger-dark cursor-pointer"
         >
           <PhoneOff size={22} />
         </Button>

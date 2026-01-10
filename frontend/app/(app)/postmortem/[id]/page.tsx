@@ -1,11 +1,12 @@
 import { Navbar } from "@/components/Navbar";
+import { fetchPostMortem, type PostMortemResult } from "@/lib/api";
 import { PostMortemHeader } from "./PostMortemHeader";
 import { PostMortemScore } from "./PostMortemScore";
 import { PostMortemPanels } from "./PostMortemPanels";
 import { PostMortemMoments } from "./PostMortemMoments";
 import { PostMortemMetrics } from "./PostMortemMetrics";
 
-const analysis = {
+const fallbackAnalysis: PostMortemResult = {
   overallScore: 85,
   strengths: [
     "Established credibility early with well-researched data points and clear understanding of market conditions",
@@ -33,7 +34,18 @@ const analysis = {
   ],
 };
 
-export default function PostMortemPage() {
+type PageProps = {
+  params: { id: string };
+};
+
+export default async function PostMortemPage({ params }: PageProps) {
+  let analysis = fallbackAnalysis;
+  try {
+    analysis = await fetchPostMortem(params.id);
+  } catch {
+    analysis = fallbackAnalysis;
+  }
+
   return (
     <div className="min-h-screen bg-white">
       <Navbar currentPage="dashboard" />

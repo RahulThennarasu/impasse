@@ -50,13 +50,13 @@ export function OpponentOrb({
 
   const particles = useMemo<Particle[]>(
     () =>
-      Array.from({ length: 64 }).map((_, index) => {
+      Array.from({ length: 48 }).map((_, index) => {
         const rng = seededRandom(index + 1);
         const angle = rng() * Math.PI * 2;
-        const radius = Math.sqrt(rng()) * 38;
+        const radius = Math.sqrt(rng()) * 32;
         return {
           id: index,
-          size: 5 + (index % 4) * 2,
+          size: 3 + (index % 3) * 2,
           x: Math.cos(angle) * radius,
           y: Math.sin(angle) * radius,
           dx: rng() * 2 - 1,
@@ -99,13 +99,13 @@ export function OpponentOrb({
     <div className="absolute left-8 top-24 flex flex-col items-start gap-3">
       <div className="relative h-28 w-28 overflow-hidden rounded-full bg-black/90">
         <div
-          className="absolute inset-0 rounded-full bg-[#7fb069]/20 blur-2xl"
+          className="absolute inset-0 rounded-full bg-olive-20 blur-2xl"
           style={{ transform: `scale(${0.75 + audioLevel * 0.5})` }}
         />
         {isThinking ? (
           <motion.div
             key={spinTrigger}
-            className="absolute inset-2 rounded-full border border-[#c5e5b4]/40"
+            className="absolute inset-2 rounded-full border border-olive-soft-40"
             animate={{ opacity: [0.2, 0.6, 0.2] }}
             transition={{ duration: 1.1, ease: "easeInOut", repeat: 2 }}
           />
@@ -121,17 +121,20 @@ export function OpponentOrb({
               Math.sin(phase + particle.p1) * particle.dx * 1.8 * speedBoost;
             const swirlY =
               Math.cos(phase + particle.p1) * particle.dy * 1.8 * speedBoost;
-            const expansion = 0.85 + activeLevel * 0.55;
+            const expansion = 0.7 + activeLevel * 0.55;
+            const sizeBoost = 1 + activeLevel * 0.9;
             const x = (particle.x + flowX + swirlX * 0.45) * expansion;
             const y = (particle.y + flowY + swirlY * 0.45) * expansion;
+            const opacity = 0.4 + activeLevel * 0.6;
             return (
               <div
                 key={particle.id}
-                className="absolute left-1/2 top-1/2 rounded-full bg-[#c5e5b4]"
+                className="absolute left-1/2 top-1/2 rounded-full bg-olive-soft"
                 style={{
-                  width: particle.size,
-                  height: particle.size,
+                  width: particle.size * sizeBoost,
+                  height: particle.size * sizeBoost,
                   transform: `translate(-50%, -50%) translate(${x}px, ${y}px)`,
+                  opacity,
                 }}
               />
             );

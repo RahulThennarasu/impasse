@@ -1,19 +1,31 @@
+"""
+Test script demonstrating the negotiation practice flow with NegotiationSession.
+
+This shows how the Session Manager coordinates between:
+- OpponentAgent (generates responses)
+- CoachAgent (provides real-time tips)
+- PostMortemAgent (analyzes after negotiation ends)
+"""
+
 from dotenv import load_dotenv
 load_dotenv()
 
 import sys
 import os
-# Add parent directory to path so we can import the agents
+
+# Add paths for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "backend"))
 
 from op_agent.op import OpponentAgent
 from coach_agent.coach import CoachAgent
+from post_mortem.mortem import PostMortemAgent
+from app.core.session import NegotiationSession
 
 # Flag to choose between generated scenario or manual test data
 USE_GENERATED_SCENARIO = False
 
 if USE_GENERATED_SCENARIO:
-    # Use the scenario generator for end-to-end integration
     from scenario_agent.scenario import generate_scenario
 
     context = "salary negotiation, technology, senior software engineer, engineering manager, promotion discussion, mid-sized SaaS, annual review in 2 weeks, higher base + equity, salary bands + headcount budget."
@@ -24,11 +36,11 @@ if USE_GENERATED_SCENARIO:
     print(f"\nScenario: {scenario_result['scenario_title']}")
     print(f"\n{scenario_result['user_narrative']}\n")
 
-    # Extract configs for agents
     opponent_config = scenario_result["opponent_agent_config"]
     coach_config = scenario_result["coach_agent_config"]
+    user_briefing = scenario_result["user_briefing"]
 else:
-    # Manual test data for quick testing without API calls
+    # Manual test data
     opponent_config = {
         "context": "Engineering manager at a mid-sized SaaS company under cost pressure",
         "counterparty_name": "Jordan (Engineering Manager)",
@@ -50,71 +62,164 @@ else:
         "info_asymmetries": "You don't know: Exact salary band ceiling, Jordan's budget flexibility, whether others already promised promotions. Jordan doesn't know: Your outside offer, how serious you are about leaving, that you've been contacted by multiple recruiters."
     }
 
+    user_briefing = {
+        "objectives": {
+            "primary": "Secure Staff Engineer promotion with compensation reflecting market value",
+            "secondary": ["Get $185K base", "Equity refresh", "Clear path to next level"]
+        },
+        "batna": {
+            "description": "Accept competitor offer at $195K",
+            "strength": "moderate",
+            "downsides": ["Reset equity vesting", "Leave known team", "Less job security"]
+        },
+        "success_criteria": {
+            "good_outcome": "12%+ total comp increase, Staff title this cycle",
+            "great_outcome": "Base at $180K+, equity refresh, documented path to Principal"
+        },
+        "negotiables": ["Base salary", "Equity refresh", "Retention bonus", "Start date"]
+    }
+
+# =============================================================================
+# CREATE SESSION AND AGENTS
+# =============================================================================
+
 print("=" * 70)
-print("NEGOTIATION SIMULATION: Salary Negotiation (V2 Agents)")
+print("NEGOTIATION SIMULATION: Session-Based Architecture")
 print("=" * 70)
-print("\n🎯 YOUR OBJECTIVES:")
+
+# Create the session - this owns the transcript
+session = NegotiationSession(
+    scenario_id="salary-negotiation-test",
+    user_briefing=user_briefing,
+    opponent_config=opponent_config,
+    coach_config=coach_config
+)
+
+# Create agents
+opponent = OpponentAgent(opponent_config)
+coach = CoachAgent(coach_config)
+
+print(f"\nSession ID: {session.session_id}")
+print(f"Opponent: {session.opponent_name}")
+
+print("\nYOUR OBJECTIVES:")
 print("   - Get $185K base (from current $158K)")
 print("   - Equity refresh")
 print("   - Staff Engineer title")
-print("\n🔒 HIDDEN INFO (opponent doesn't know):")
+print("\nHIDDEN INFO (opponent doesn't know):")
 print("   - You have outside offer at $195K")
 print("   - You've been contacted by multiple recruiters")
 print("\n" + "=" * 70 + "\n")
 
-# Initialize agents with the configs (either generated or manual)
-opponent = OpponentAgent(opponent_config)
-coach = CoachAgent(coach_config)
+# =============================================================================
+# START NEGOTIATION
+# =============================================================================
 
-# Simulate negotiation
-conversation = [
+session.start()
+
+# Opponent opens
+print("OPPONENT OPENING:")
+opening = opponent.get_opening_message()
+session.add_opening_message(opening, audio_duration_ms=2500)
+print(f"JORDAN: {opening}\n")
+
+# Simulated user messages (in real app, these come from STT)
+user_messages = [
     "Thanks for meeting with me. I wanted to discuss the Staff Engineer promotion and compensation adjustment.",
     "I appreciate that, but I've done my research and the market rate for Staff Engineers with my experience is around $185K. Can we discuss getting closer to that number?",
     "Actually, I do have some time sensitivity. I've received interest from other companies and need to make a decision soon. What if we explored a retention bonus to bridge the gap?",
     "I can accept $175K base with a $15K retention bonus and an equity refresh of 50% of new hire grant. Does that work for you?"
 ]
 
-for turn, user_msg in enumerate(conversation, 1):
+# Run the negotiation
+for user_msg in user_messages:
     print(f"{'─' * 70}")
-    print(f"TURN {turn}")
+    print(f"TURN {session.current_turn + 1}")
     print(f"{'─' * 70}\n")
 
-    # User speaks
-    print(f"💬 YOU: {user_msg}\n")
+    # User speaks (in real app: STT transcribes audio)
+    session.add_user_message(user_msg, audio_duration_ms=3000)
+    print(f"YOU: {user_msg}\n")
 
-    # Opponent responds
-    opp_response = opponent.get_response(user_msg)
-    print(f"💼 JORDAN: {opp_response}\n")
+    # Opponent responds (Session provides transcript to agent)
+    import time
+    start = time.time()
+    opp_response = opponent.get_response(session.get_llm_transcript())
+    latency = int((time.time() - start) * 1000)
 
-    # Coach analyzes
-    tip = coach.analyze_turn(opponent.transcript)
+    session.add_opponent_message(opp_response, latency_ms=latency, audio_duration_ms=2000)
+    print(f"JORDAN: {opp_response}\n")
+
+    # Coach analyzes (Session provides transcript to coach)
+    tip = coach.analyze_turn(session.get_transcript())
     if tip:
-        print(f"🎯 COACH: {tip}")
+        print(f"COACH: {tip}")
     else:
-        print(f"🎯 COACH: (watching silently...)")
+        print(f"COACH: (watching silently...)")
 
     print()
 
-# Final analysis
+# =============================================================================
+# END NEGOTIATION
+# =============================================================================
+
+session.end()
+
 print("\n" + "=" * 70)
 print("NEGOTIATION COMPLETE")
 print("=" * 70)
 
-final_advice = coach.get_final_advice(opponent.transcript)
-print(f"\n📊 COACH'S FINAL FEEDBACK:\n{final_advice}\n")
+# Session metrics
+print(f"\nSession Metrics:")
+print(f"  Duration: {session.get_duration_seconds():.1f} seconds")
+print(f"  Turns: {session.get_turn_count()}")
+print(f"  Messages: {session.get_message_count()}")
+print(f"  Avg Response Latency: {session.get_average_response_latency():.0f}ms")
 
-# Post-mortem reveal
+# Coach final advice
+print(f"\nCOACH'S FINAL FEEDBACK:")
+final_advice = coach.get_final_advice(session.get_transcript())
+print(final_advice)
+
+# =============================================================================
+# POST-MORTEM ANALYSIS
+# =============================================================================
+
+print("\n" + "=" * 70)
+print("POST-MORTEM ANALYSIS")
 print("=" * 70)
-print("POST-MORTEM: OPPONENT'S HIDDEN STATE REVEALED")
+
+# Create post-mortem agent with full context
+post_mortem = PostMortemAgent(
+    user_briefing=user_briefing,
+    opponent_hidden_state=opponent.get_hidden_state(),
+    coach_config=coach_config
+)
+
+# Get opponent reveal
+print("\n" + post_mortem.get_opponent_reveal())
+
+# Run full analysis (uncomment to run - makes API call)
+# print("\nRunning full post-mortem analysis...")
+# analysis = post_mortem.analyze(session.get_transcript())
+# print(post_mortem.get_summary(analysis))
+
+# =============================================================================
+# SHOW SESSION DATA (for debugging/storage)
+# =============================================================================
+
+print("\n" + "=" * 70)
+print("SESSION DATA (for storage)")
 print("=" * 70)
-hidden = opponent.get_hidden_state()
-print(f"\nJordan's real constraints:")
-print(f"  • {hidden['batna']}")
-print(f"  • {hidden['constraints']}")
-print(f"\nWhat Jordan didn't know:")
-print(f"  • {hidden['info_asymmetries']}")
-print(f"\n💡 ANALYSIS:")
-print(f"   You negotiated to $175K base + $15K retention + equity.")
-print(f"   Their ceiling was $175K without VP exception.")
-print(f"   You extracted the maximum from their band AND got extra value via retention bonus!")
-print(f"   Strong negotiation - you discovered their constraint and worked around it.")
+
+session_data = session.to_dict()
+print(f"\nSession ID: {session_data['session_id']}")
+print(f"Status: {session_data['status']}")
+print(f"Transcript entries: {len(session_data['transcript'])}")
+
+# Show one transcript entry as example
+if session_data['transcript']:
+    print(f"\nExample transcript entry:")
+    entry = session_data['transcript'][1]  # First user message
+    for key, value in entry.items():
+        print(f"  {key}: {value}")

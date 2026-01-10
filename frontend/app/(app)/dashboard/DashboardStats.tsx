@@ -29,18 +29,18 @@ export function DashboardStats() {
           const Icon = stat.icon;
           const clipClass = index % 2 === 0 ? "clip-card-a" : "clip-card-b";
           return (
-            <div key={stat.label} className={`bg-[#7fb069] p-[3px] ${clipClass}`}>
+            <div key={stat.label} className={`bg-olive p-[3px] ${clipClass}`}>
               <div className={`relative bg-white p-10 ${clipClass}`}>
-                <div className="absolute right-6 top-6 flex h-12 w-12 items-center justify-center bg-[#7fb069]/10 text-[#7fb069] clip-hex">
+                <div className="absolute right-6 top-6 flex h-12 w-12 items-center justify-center bg-olive-10 text-olive clip-hex">
                   <Icon size={22} />
                 </div>
-                <div className="text-xs font-bold uppercase tracking-[0.2em] text-[#7fb069]">
+                <div className="text-xs font-bold uppercase tracking-[0.2em] text-olive">
                   {stat.label}
                 </div>
-                <div className="mt-4 text-5xl font-serif text-[#1a1a1a]">
+                <div className="mt-4 text-5xl font-serif text-ink">
                   {stat.value}
                 </div>
-                <div className="mt-3 text-sm font-semibold text-[#7fb069]">
+                <div className="mt-3 text-sm font-semibold text-olive">
                   {stat.subtext}
                 </div>
               </div>

@@ -8,7 +8,7 @@ import os
 env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
 load_dotenv(env_path)
 
-from app.websockets.v1.api import api_router
+from app.websockets.v1.negotiation import negotiation_router
 from app.routes.v1.videos import videos_router
 from app.core.config import settings
 
@@ -30,7 +30,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(api_router, prefix="/api/v1")
+app.include_router(negotiation_router, prefix="/api/v1")
 app.include_router(videos_router, prefix="/api/v1")
 
 @app.get("/health")

@@ -96,6 +96,15 @@ class NegotiationSession:
         self.user_turns = 0
         self.coach_every_n_turns = int(os.getenv("COACH_EVERY_N_TURNS", "3"))
         self.coach_max_chars = int(os.getenv("COACH_MAX_CHARS", "220"))
+        self.coach_early_turns = int(os.getenv("COACH_EARLY_TURNS", "4"))
+        self.coach_early_every_n_turns = int(os.getenv("COACH_EARLY_EVERY_N_TURNS", "2"))
+        self.acceptance_phrases = [
+            p.strip().lower() for p in os.getenv(
+                "NEGOTIATION_ACCEPT_PHRASES",
+                "i accept,i'll take,i will take,sounds good,that works,deal,i agree,"
+                "i'll go with,i would take,i can take"
+            ).split(",") if p.strip()
+        ]
 
         logger.info(f"Created negotiation session {session_id}")
 
@@ -237,6 +246,20 @@ class NegotiationSession:
     async def process_user_message(self, user_text: str):
         """Process user's message through opponent and coach agents"""
         try:
+            if self._is_acceptance(user_text):
+                self.opponent.transcript.append({"role": "user", "content": user_text})
+                final_advice = self.coach.get_final_advice(self.opponent.transcript)
+                hidden_state = self.opponent.get_hidden_state()
+                await self.websocket.send_json({
+                    "type": "negotiation_complete",
+                    "final_advice": final_advice,
+                    "hidden_state": hidden_state,
+                    "transcript": self.opponent.transcript,
+                    "auto_ended": True
+                })
+                await self.websocket.close()
+                return
+
             # Get opponent response
             opponent_response = self.opponent.get_response(user_text)
             logger.info(f"Session {self.session_id}: Opponent response: {opponent_response}")
@@ -252,7 +275,8 @@ class NegotiationSession:
 
             # Get coach analysis on a reduced cadence; only forward short actionable tips
             self.user_turns += 1
-            if self.user_turns % self.coach_every_n_turns == 0:
+            cadence = self.coach_early_every_n_turns if self.user_turns <= self.coach_early_turns else self.coach_every_n_turns
+            if cadence > 0 and self.user_turns % cadence == 0:
                 coach_tip = self.coach.analyze_turn(self.opponent.transcript)
                 if coach_tip and coach_tip.startswith("💡") and len(coach_tip) <= self.coach_max_chars:
                     logger.info(f"Session {self.session_id}: Coach tip: {coach_tip}")
@@ -325,6 +349,14 @@ class NegotiationSession:
                 logger.info(f"Session {self.session_id}: Received audio bytes ({len(audio_data)})")
                 self.received_audio = True
             self.dg_connection.send(audio_data)
+
+    def _is_acceptance(self, text: str) -> bool:
+        lowered = text.lower().strip()
+        if not lowered:
+            return False
+        if "accept" in lowered and ("not" in lowered or "don't" in lowered or "do not" in lowered):
+            return False
+        return any(phrase in lowered for phrase in self.acceptance_phrases)
 
     def _schedule_transcript_flush(self):
         if not self.loop:

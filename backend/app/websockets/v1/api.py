@@ -4,6 +4,8 @@ from typing import Dict, Optional
 import json
 from .negotiation import negotiation_router
 
+from agents.scenario_agent.scenario import generate_scenario
+
 logger = logging.getLogger(__name__)
 
 api_router = APIRouter()
@@ -179,4 +181,16 @@ async def get_session_info(session_id: str):
         "status": "active"
     }
 
-
+@api_router.post("/video/session/{session_id}/scenario_info")
+async def update_scenario_info(session_id: str, scenario_info: str):
+    """Update scenario information for a video call session"""
+    session = call_manager.get_session(session_id)
+    if not session:
+        return {"error": "Session not found", "session_id": session_id}
+    
+    scenario_para = generate_scenario(scenario_info)
+    logger.info(f"Session {session_id}: Scenario info updated")
+    
+    return {
+        scenario_para
+    }

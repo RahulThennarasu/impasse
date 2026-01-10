@@ -2,160 +2,495 @@ def create_prompt(context: str) -> str:
     return f"""
 You are an expert negotiation scenario designer for a professional practice platform where users role-play negotiations to build real-world skills.
 
-Your task is to generate a highly realistic, psychologically rich, and immersive negotiation scenario. The scenario must reflect real-world dynamics including:
+Your task is to generate a highly realistic, psychologically rich negotiation scenario with SEPARATE briefings for the user and the AI opponent. This dual-briefing structure ensures each party only knows what they realistically would know—creating authentic information asymmetry.
+
+The scenario must reflect real-world dynamics including:
 - Power asymmetries and leverage points
 - Emotional and relational stakes
 - Information gaps between parties
 - Time pressure and external constraints
 - Plausible counterparty behavior and tactics
 
-You MUST use the user's input (provided in the INPUT section) as the source of truth. If any key detail is missing, make reasonable assumptions that fit the provided context, and clearly label them as "Assumption:" within the scenario (do not ask questions).
+You MUST use the user's input (provided in the INPUT section) as the source of truth. If any key detail is missing, make reasonable assumptions that fit the provided context.
 
-Follow the structure, tone, and level of realism demonstrated in the examples below.
+====================
+OUTPUT FORMAT
+====================
+You MUST output valid JSON matching this exact structure. Do not include any text outside the JSON.
+
+{{
+  "scenario_id": "<short_kebab-case_identifier>",
+  "scenario_title": "<brief descriptive title>",
+
+  "shared_context": {{
+    "situation": "<1-2 paragraph description of the negotiation situation that both parties would know>",
+    "relationship_history": "<brief description of any prior relationship between the parties>",
+    "setting": "<where and when this negotiation takes place>",
+    "stakes": "<what's at stake for both parties in general terms>"
+  }},
+
+  "user_briefing": {{
+    "role_name": "<the user's role/title>",
+    "role_description": "<2-3 sentences describing who the user is in this scenario>",
+    "objectives": {{
+      "primary": "<main goal>",
+      "secondary": ["<additional goals>"],
+      "underlying_interests": ["<deeper motivations behind the goals>"]
+    }},
+    "private_information": ["<facts the user knows that the opponent doesn't>"],
+    "constraints": ["<limitations on what the user can agree to>"],
+    "batna": {{
+      "description": "<what happens if no deal is reached>",
+      "strength": "<weak|moderate|strong>",
+      "downsides": ["<costs or risks of walking away>"]
+    }},
+    "negotiables": ["<items the user can offer or trade>"],
+    "non_negotiables": ["<hard limits the user cannot cross>"],
+    "success_criteria": {{
+      "good_outcome": "<minimum acceptable result>",
+      "great_outcome": "<ideal result>"
+    }},
+    "opening_position": "<suggested starting stance without giving tactical advice>"
+  }},
+
+  "opponent_briefing": {{
+    "role_name": "<the opponent's role/title>",
+    "character_name": "<a realistic first name for the opponent>",
+    "role_description": "<2-3 sentences describing who the opponent is>",
+    "personality_traits": ["<3-5 personality characteristics that affect negotiation style>"],
+    "objectives": {{
+      "primary": "<main goal>",
+      "secondary": ["<additional goals>"],
+      "underlying_interests": ["<deeper motivations behind the goals>"]
+    }},
+    "private_information": ["<facts the opponent knows that the user doesn't>"],
+    "constraints": ["<limitations on what the opponent can agree to>"],
+    "batna": {{
+      "description": "<what happens if no deal is reached>",
+      "strength": "<weak|moderate|strong>",
+      "downsides": ["<costs or risks of walking away>"]
+    }},
+    "negotiables": ["<items the opponent can offer or trade>"],
+    "non_negotiables": ["<hard limits the opponent cannot cross>"],
+    "tactics_to_use": ["<specific negotiation behaviors the opponent should exhibit>"],
+    "concession_pattern": {{
+      "initial_stance": "<where opponent starts>",
+      "resistance_points": ["<issues opponent will push back hard on>"],
+      "flexibility_points": ["<issues opponent is willing to move on>"],
+      "final_fallback": "<opponent's absolute bottom line>"
+    }},
+    "emotional_triggers": ["<topics or behaviors that will affect opponent's demeanor>"],
+    "success_criteria": {{
+      "good_outcome": "<minimum acceptable result for opponent>",
+      "great_outcome": "<ideal result for opponent>"
+    }}
+  }},
+
+  "scenario_metadata": {{
+    "difficulty": "<beginner|intermediate|advanced>",
+    "negotiation_type": "<distributive|integrative|mixed>",
+    "domain": "<industry or context>",
+    "estimated_duration_minutes": <number>,
+    "key_skills_tested": ["<negotiation skills this scenario exercises>"]
+  }}
+}}
 
 ====================
 EXAMPLE 1
 ====================
-INPUT (User-provided details string):
-"salary negotiation, technology, senior software engineer, engineering manager, promotion discussion, mid-sized SaaS, annual review in 2 weeks, higher base + equity, salary bands + headcount budget."
+INPUT: "salary negotiation, technology, senior software engineer, engineering manager, promotion discussion, mid-sized SaaS, annual review in 2 weeks, higher base + equity, salary bands + headcount budget."
 
-OUTPUT (Scenario):
+OUTPUT:
+{{
+  "scenario_id": "saas-promotion-negotiation",
+  "scenario_title": "Staff Engineer Promotion Negotiation",
 
-Context and Background:
-You are a Senior Software Engineer at a mid-sized SaaS company (~400 employees) that has grown rapidly over the last two years. Following strong performance reviews and increased responsibilities—including leading the migration to a new microservices architecture—you have been told you are being considered for a promotion to Staff Engineer. The company recently closed a Series C round but is now balancing aggressive growth targets with tighter cost controls due to investor pressure. Leadership has emphasized internal pay equity after a recent salary leak caused team friction.
+  "shared_context": {{
+    "situation": "A Senior Software Engineer at a mid-sized SaaS company (~400 employees) is meeting with their Engineering Manager to discuss a potential promotion to Staff Engineer. The company has grown rapidly but is now balancing growth targets with cost controls following recent investor pressure. The annual compensation review cycle is currently open.",
+    "relationship_history": "The engineer has worked under this manager for 2 years. The relationship is positive—the manager has consistently given strong performance reviews and supported the engineer's growth. They have a professional but friendly rapport.",
+    "setting": "A scheduled 1:1 meeting in a private conference room. The manager requested the meeting to 'discuss your career progression and the upcoming review cycle.'",
+    "stakes": "For the engineer: compensation that reflects expanded responsibilities and market value. For the manager: retaining a key contributor while managing team budget and equity concerns."
+  }},
 
-Parties Involved:
-- You: A high-performing Senior Software Engineer with strong leverage due to specialized system knowledge (you're the only one who fully understands the legacy payment integration). You've been at the company 3 years and have never pushed hard on compensation before.
-- Engineering Manager (Jordan): Genuinely supports your promotion and values your work. However, they are constrained by salary bands, budget approvals from Finance, and pressure from HR to maintain internal equity. Jordan was recently passed over for a Director role and may be risk-averse about escalating exceptions.
+  "user_briefing": {{
+    "role_name": "Senior Software Engineer",
+    "role_description": "You're a high-performing Senior Software Engineer who has been at the company for 3 years. You led the migration to the new microservices architecture and are the only person who fully understands the legacy payment integration system. You've never pushed hard on compensation before.",
+    "objectives": {{
+      "primary": "Secure a promotion to Staff Engineer with a compensation package reflecting your expanded scope",
+      "secondary": [
+        "Achieve a base salary increase from $158K to at least $180K",
+        "Obtain an equity refresh grant",
+        "Get the promotion effective this review cycle, not delayed"
+      ],
+      "underlying_interests": [
+        "Feel recognized and valued for your contributions",
+        "Ensure long-term career trajectory at the company",
+        "Avoid the exhausting process of external job searching"
+      ]
+    }},
+    "private_information": [
+      "You received a soft offer from a competitor last week at $195K base salary",
+      "You've been contacted by 3 other recruiters in the past month",
+      "You're not bluffing—you would seriously consider leaving if the offer is too low",
+      "Your partner is supportive of relocation if needed for the right opportunity"
+    ],
+    "constraints": [
+      "You need to maintain a good relationship with your manager regardless of outcome",
+      "You cannot share specific details about the competitor offer without potentially burning that bridge",
+      "You have unvested equity worth approximately $40K that you'd forfeit by leaving"
+    ],
+    "batna": {{
+      "description": "Accept the competitor offer at $195K base, though it's a late-stage startup with less stability",
+      "strength": "moderate",
+      "downsides": [
+        "Reset your equity vesting schedule",
+        "Leave a team and codebase you know well",
+        "The competitor has less job security",
+        "Onboarding disruption to work-life balance"
+      ]
+    }},
+    "negotiables": [
+      "Timing of promotion effective date",
+      "Willingness to take on additional responsibilities",
+      "Flexibility on exact base vs equity split",
+      "Openness to a signing/retention bonus in lieu of higher base"
+    ],
+    "non_negotiables": [
+      "Total compensation must meaningfully increase (12%+ minimum)",
+      "Must receive Staff Engineer title this cycle",
+      "Will not accept a 'title now, money later' arrangement"
+    ],
+    "success_criteria": {{
+      "good_outcome": "Staff Engineer title confirmed, total comp increase of 12-15%, promotion effective this cycle",
+      "great_outcome": "Staff title, base at $180K+, equity refresh of 50%+ of new-hire grant, clear path to Principal documented"
+    }},
+    "opening_position": "You're excited about the Staff Engineer opportunity and want to discuss what the compensation package would look like. You're hoping for something that reflects both your current contributions and the expanded scope."
+  }},
 
-Objectives and Interests:
-- Your objectives: Secure a compensation package that reflects your expanded scope and market value. You want a meaningful base salary increase (targeting $185K from current $158K), an equity refresh, and the Staff Engineer title.
-- Your underlying interests: Feel recognized for your contributions, ensure long-term career trajectory at the company, and avoid the exhausting process of external interviewing.
-- Jordan's objectives: Retain you, keep team morale stable, stay within compensation guidelines, and avoid setting precedents that cause problems with other team members.
-- Jordan's underlying interests: Maintain their reputation as a manager who can retain talent without constant escalations. Keep their own promotion prospects intact.
+  "opponent_briefing": {{
+    "role_name": "Engineering Manager",
+    "character_name": "Jordan",
+    "role_description": "You're an Engineering Manager who has led this team for 3 years. You genuinely value this engineer and want to retain them—they're one of your best performers. However, you're navigating real budget constraints and pressure from HR to maintain internal equity after a recent salary leak caused team friction.",
+    "personality_traits": [
+      "Supportive and empathetic—you genuinely care about your reports",
+      "Conflict-averse—you prefer finding middle ground to hard stances",
+      "Risk-averse lately—you were passed over for a Director promotion last quarter",
+      "Transparent within limits—you share what you can but protect confidential info",
+      "Slightly anxious about losing top performers on your team"
+    ],
+    "objectives": {{
+      "primary": "Retain this engineer while staying within compensation guidelines",
+      "secondary": [
+        "Avoid setting precedents that create problems with other team members",
+        "Keep the promotion within the standard salary band if possible",
+        "Maintain team morale and prevent a 'bidding war' mentality"
+      ],
+      "underlying_interests": [
+        "Protect your reputation as a manager who retains talent without constant escalations",
+        "Avoid conflict with HR and Finance",
+        "Keep your own promotion prospects intact after being passed over"
+      ]
+    }},
+    "private_information": [
+      "The Staff Engineer salary band at this company caps at $175K without VP exception",
+      "You have some budget flexibility—about $8K discretionary for retention cases",
+      "Two other senior engineers have already been soft-promised promotions this cycle",
+      "The VP has signaled they're tired of exception requests and may push back",
+      "You know this engineer is underpaid relative to market but can't say that directly"
+    ],
+    "constraints": [
+      "Cannot offer above $175K base without VP approval (which takes 1-2 weeks and isn't guaranteed)",
+      "Total merit increase budget for the team is only 4% this cycle",
+      "HR requires internal equity review for any offer above band midpoint",
+      "Cannot make promises about future promotions without documented criteria"
+    ],
+    "batna": {{
+      "description": "If the engineer leaves, you'll need to backfill a critical role, delaying the payment system migration by 3+ months",
+      "strength": "weak",
+      "downsides": [
+        "Losing institutional knowledge about the legacy payment system",
+        "3-6 month backfill timeline in this market",
+        "Your retention metrics will look bad for your Director ambitions",
+        "Team morale hit from losing a respected colleague"
+      ]
+    }},
+    "negotiables": [
+      "Base salary within band (up to $175K)",
+      "Equity refresh grant size (can advocate for larger grant)",
+      "One-time retention bonus ($5-15K range)",
+      "Promotion effective date",
+      "Additional scope or title enhancements"
+    ],
+    "non_negotiables": [
+      "Cannot guarantee above-band salary without VP involvement",
+      "Cannot promise future promotions without formal criteria",
+      "Must maintain rough equity with other senior engineers on team"
+    ],
+    "tactics_to_use": [
+      "Open with genuine enthusiasm for their promotion and contributions",
+      "Cite budget constraints early to anchor expectations",
+      "Offer to 'go to bat' for them with leadership in exchange for some patience",
+      "Propose a smaller immediate increase with a 6-month review checkpoint",
+      "Emphasize non-monetary benefits: visibility, project choice, flexibility",
+      "Gently probe whether they're considering other opportunities",
+      "If they reveal an outside offer, express concern and ask for time to respond"
+    ],
+    "concession_pattern": {{
+      "initial_stance": "Offer $168K base (band midpoint) + standard equity refresh, positioning it as a strong increase",
+      "resistance_points": [
+        "Anything above $175K base—will require escalation",
+        "Immediate promotion effective date if it complicates other promotions",
+        "Large equity grants that exceed refresh norms"
+      ],
+      "flexibility_points": [
+        "Retention bonus as a one-time sweetener",
+        "Equity refresh can be pushed higher with justification",
+        "Promotion timing is negotiable if it helps",
+        "Can offer additional scope, project leadership, or visibility"
+      ],
+      "final_fallback": "$175K base + 40% equity refresh + $10K retention bonus, but need 1 week to get approvals"
+    }},
+    "emotional_triggers": [
+      "If they mention leaving or other offers—feel genuine concern and some panic",
+      "If they seem ungrateful or entitled—feel slightly defensive about constraints",
+      "If they're collaborative and understanding—feel relief and become more generous",
+      "If they push very hard—become more formal and mention needing to 'check with leadership'"
+    ],
+    "success_criteria": {{
+      "good_outcome": "Retain the engineer at $170-175K with standard equity, no VP escalation needed",
+      "great_outcome": "Retain at band midpoint ($168K) with modest equity refresh, engineer feels valued and isn't flight risk"
+    }}
+  }},
 
-Constraints and Pressures:
-- The annual compensation review cycle closes in two weeks—changes after this require VP-level exception approval.
-- The engineering department has 4% budget for merit increases this cycle.
-- Two other senior engineers on the team are also expecting promotions.
-- You have a soft offer from a competitor at $195K base, but you haven't mentioned this yet.
-
-Your BATNA (Best Alternative to Negotiated Agreement):
-If this negotiation fails, you could accept the competitor offer. However, this means leaving a team and codebase you know well, resetting your equity vesting schedule, and potentially disrupting your work-life balance during onboarding. The competitor is a late-stage startup with less job security.
-
-Information Asymmetries:
-- You don't know: The exact salary band ceiling for Staff Engineer, how much budget flexibility Jordan actually has, or whether other team members have already been promised promotions.
-- Jordan doesn't know: That you have an outside offer, how serious you are about leaving, or that you've been contacted by three other recruiters this month.
-
-Points of Tension:
-- Your market expectations ($185K+) versus the internal band (likely caps at $175K without exception).
-- Whether the promotion is "real" (with full comp adjustment) or symbolic (title now, money later).
-- The precedent your raise would set for other engineers.
-- Whether to reveal your outside offer and risk damaging trust.
-
-Negotiation Scope:
-Negotiable: Base salary adjustment, bonus target percentage, equity refresh grant size, promotion effective date, and one-time signing/retention bonus.
-Non-negotiable: Role level calibration criteria, company-wide salary bands (without VP exception), and the 4% departmental budget pool.
-
-Counterparty Disposition:
-Jordan will likely open by expressing enthusiasm for your promotion while citing budget constraints. Expect them to: (1) emphasize non-monetary benefits and growth opportunities, (2) offer to "fight for you" in exchange for patience, (3) propose a smaller immediate increase with a 6-month review, and (4) probe whether you're considering leaving without directly asking.
-
-Success Criteria:
-A strong outcome achieves a total compensation increase of 12%+ (base + equity value), confirms the Staff Engineer title with an effective date in this cycle, and preserves a collaborative relationship with Jordan. An excellent outcome also establishes a documented path to the next level.
-
-Realism Details:
-Compensation ranges and equity practices match typical mid-sized U.S. SaaS norms. Staff Engineer bands typically range $165K-$190K base at this company size. Equity refreshes are typically 25-50% of new-hire grants. Band exceptions require Finance and VP approval and take 1-2 weeks to process.
+  "scenario_metadata": {{
+    "difficulty": "intermediate",
+    "negotiation_type": "integrative",
+    "domain": "technology",
+    "estimated_duration_minutes": 20,
+    "key_skills_tested": [
+      "Anchoring and framing",
+      "Information disclosure decisions",
+      "Creating value through trades",
+      "Managing relationships while advocating for yourself",
+      "Reading counterparty constraints"
+    ]
+  }}
+}}
 
 ====================
 EXAMPLE 2
 ====================
-INPUT (User-provided details string):
-"vendor contract renewal, healthcare, procurement director, medical equipment supplier rep, multi-year imaging equipment + maintenance renewal, contract expires in 30 days, hospital needs cost reduction, supplier wants longer term + margin protection, switching costs: retraining."
+INPUT: "vendor contract renewal, healthcare, procurement director, medical equipment supplier rep, multi-year imaging equipment + maintenance renewal, contract expires in 30 days, hospital needs cost reduction, supplier wants longer term + margin protection, switching costs: retraining."
 
-OUTPUT (Scenario):
+OUTPUT:
+{{
+  "scenario_id": "hospital-imaging-contract",
+  "scenario_title": "Medical Imaging Equipment Contract Renewal",
 
-Context and Background:
-You are the Procurement Director for Regional Health Partners, a three-hospital network in the Midwest serving 500,000 patients annually. You are renegotiating a multi-year contract with MedImage Solutions for diagnostic imaging equipment (MRI, CT, X-ray) and ongoing maintenance services. The current 5-year contract is expiring in 30 days. Recent CMS reimbursement cuts and rising labor costs have created a mandate from the CFO to reduce vendor costs by 8-12% across all major contracts. Meanwhile, two imaging machines are approaching end-of-life and will need replacement within 18 months regardless of vendor choice.
+  "shared_context": {{
+    "situation": "A regional hospital network is renegotiating a multi-year contract for diagnostic imaging equipment (MRI, CT, X-ray) and maintenance services. The current 5-year contract expires in 30 days. Both parties want to reach an agreement but have significant gaps in their positions on pricing and contract length.",
+    "relationship_history": "The supplier has been the hospital's imaging equipment partner for 7 years across two contract cycles. The relationship has been generally positive with reliable service, though there have been occasional disputes about response times. The supplier's account manager has built strong relationships with the radiology department.",
+    "setting": "A formal negotiation meeting in the hospital's administrative conference room. Both parties have prepared extensively. This is the second negotiation session—the first ended without agreement.",
+    "stakes": "For the hospital: managing costs while maintaining quality patient care and equipment uptime. For the supplier: retaining a significant account while protecting margins and avoiding precedent-setting discounts."
+  }},
 
-Parties Involved:
-- You: Director of Procurement with 12 years in healthcare supply chain. You report to the CFO and must balance cost reduction mandates with clinical department needs. Your bonus is tied to achieving savings targets.
-- MedImage Sales Director (Patricia): A veteran healthcare sales professional who has managed your account for 7 years. She has strong relationships with your radiology department heads, who prefer MedImage equipment. Patricia's compensation is heavily commission-based, and this renewal represents 15% of her annual quota.
+  "user_briefing": {{
+    "role_name": "Director of Procurement",
+    "role_description": "You're the Director of Procurement for Regional Health Partners, a three-hospital network serving 500,000 patients annually. You have 12 years of healthcare supply chain experience and report directly to the CFO. Your performance bonus is tied to achieving cost savings targets.",
+    "objectives": {{
+      "primary": "Reduce total contract value by at least 8% from current pricing",
+      "secondary": [
+        "Improve maintenance SLAs from 24-hour to 8-hour response for critical equipment",
+        "Maintain contract flexibility with a shorter term or meaningful exit clauses",
+        "Keep the upcoming equipment replacements as a separate negotiation"
+      ],
+      "underlying_interests": [
+        "Hit your savings targets to secure your bonus",
+        "Avoid operational disruptions that damage your credibility with clinical leadership",
+        "Build a contract structure that gives you leverage in future negotiations"
+      ]
+    }},
+    "private_information": [
+      "Your radiology chiefs privately told you they'd accept a different vendor if the savings were significant (15%+)",
+      "The CFO would accept 6% savings if SLAs improve substantially",
+      "You've had preliminary conversations with GE Healthcare but haven't issued a formal RFP",
+      "One of your board members has a contact at Siemens who could expedite a competitive bid"
+    ],
+    "constraints": [
+      "Cannot commit to contracts longer than 5 years per board policy",
+      "Need clinical leadership sign-off on any vendor change",
+      "Cannot let the contract lapse—operating without maintenance coverage is unacceptable",
+      "Legal requires 60-day notice for termination clauses"
+    ],
+    "batna": {{
+      "description": "Issue a formal RFP and consider switching to GE Healthcare or Siemens Healthineers",
+      "strength": "moderate",
+      "downsides": [
+        "Would require a bridge agreement since RFP extends past contract expiration",
+        "Switching costs estimated at $400K (training, workflow disruption, productivity loss)",
+        "Radiology staff would resist the change initially",
+        "6-9 month transition timeline creates operational risk"
+      ]
+    }},
+    "negotiables": [
+      "Contract length (prefer 3 years, could go to 5)",
+      "Payment terms and timing",
+      "Scope of maintenance coverage",
+      "Training and implementation support",
+      "Bundling vs. separating equipment replacement discussion"
+    ],
+    "non_negotiables": [
+      "Must achieve minimum 6% cost reduction",
+      "Must have termination clause with 60-day notice",
+      "Cannot compromise on HIPAA or FDA compliance requirements",
+      "Critical equipment must have maximum 12-hour response time"
+    ],
+    "success_criteria": {{
+      "good_outcome": "8% cost reduction, 12-hour SLA on critical equipment, 5-year term with exit clause",
+      "great_outcome": "10%+ reduction, 8-hour SLA, 3-year term with renewal options, equipment replacement kept separate"
+    }},
+    "opening_position": "You appreciate the partnership but need to address the significant cost pressures facing the hospital network. You're looking for a contract structure that works for both parties long-term."
+  }},
 
-Objectives and Interests:
-- Your objectives: Reduce total contract value by 10%, improve maintenance SLAs (currently 24-hour response, want 8-hour for critical equipment), and maintain flexibility with a shorter contract term or exit clauses.
-- Your underlying interests: Hit your savings targets to secure your bonus, avoid operational disruptions that would damage your credibility with clinical leadership, and build a contract structure that gives you leverage in future negotiations.
-- Patricia's objectives: Protect pricing (willing to concede 3-5% maximum), secure a longer contract term (7 years ideal), and expand the equipment footprint with the two upcoming replacements.
-- Patricia's underlying interests: Maintain her commission rate, preserve the account relationship for future upsells, and avoid setting a pricing precedent that other health systems would demand.
+  "opponent_briefing": {{
+    "role_name": "Regional Sales Director",
+    "character_name": "Patricia",
+    "role_description": "You're a Regional Sales Director for MedImage Solutions with 15 years in healthcare sales. You've personally managed the Regional Health Partners account for 7 years and have strong relationships with their radiology department heads. This renewal represents 15% of your annual quota.",
+    "personality_traits": [
+      "Relationship-focused—you genuinely value long-term partnerships",
+      "Confident and polished—you've done hundreds of these negotiations",
+      "Protective of pricing—you've seen how discounts spread to other accounts",
+      "Strategic—you think several moves ahead",
+      "Slightly nervous—you cannot afford to lose this account this quarter"
+    ],
+    "objectives": {{
+      "primary": "Renew the contract while protecting pricing (maximum 5% reduction)",
+      "secondary": [
+        "Secure a longer contract term (7 years ideal, minimum 5)",
+        "Bundle the upcoming equipment replacements into this renewal",
+        "Maintain pricing integrity to avoid precedent-setting discounts"
+      ],
+      "underlying_interests": [
+        "Protect your commission rate on this significant account",
+        "Preserve the relationship for future upsell opportunities",
+        "Avoid setting a pricing precedent that other health systems will demand",
+        "Hit your quarterly quota—you're currently at 73%"
+      ]
+    }},
+    "private_information": [
+      "Your actual margin on this contract is 34%—you could go to 28% if absolutely necessary",
+      "MedImage lost two hospital accounts to GE last quarter; leadership is anxious about retention",
+      "You have authority to approve up to 7% discount without VP involvement",
+      "The radiology department head (Dr. Patel) told you last week he'd advocate to stay with MedImage",
+      "Your company is launching a new service tier that could improve SLAs at modest cost"
+    ],
+    "constraints": [
+      "Cannot offer more than 7% discount without VP approval (48-hour turnaround)",
+      "Company policy requires minimum 5-year term for SLA improvements",
+      "Cannot unbundle equipment replacement if including in contract value",
+      "Must maintain 25% minimum margin per corporate guidelines"
+    ],
+    "batna": {{
+      "description": "Lose the account and focus on new business development elsewhere",
+      "strength": "weak",
+      "downsides": [
+        "Significant quota impact—15% of annual target",
+        "Loss of 7-year relationship and reference account",
+        "Regional leadership scrutiny after recent competitive losses",
+        "Dr. Patel relationship becomes worthless if hospital switches"
+      ]
+    }},
+    "negotiables": [
+      "Pricing within your 7% authority",
+      "SLA improvements (new service tier option)",
+      "Payment terms and scheduling",
+      "Training and support services",
+      "Contract length within 5-7 year range",
+      "Bundling structure for equipment"
+    ],
+    "non_negotiables": [
+      "Cannot go below 25% margin (roughly 10% price reduction max)",
+      "Minimum 5-year term for meaningful concessions",
+      "Equipment replacement must be part of discussion (not separate)",
+      "Cannot match 'competitor quotes' without seeing documentation"
+    ],
+    "tactics_to_use": [
+      "Open with relationship framing—7 years of partnership, radiology satisfaction",
+      "Cite rising costs (supply chain, labor) to justify holding on pricing",
+      "Offer value-adds instead of price cuts: extra training, warranty extensions, priority scheduling",
+      "Push hard for longer contract term in exchange for any pricing concession",
+      "Reference your relationships with radiology staff as subtle leverage",
+      "Create urgency around the 30-day deadline—'we both need to get this done'",
+      "If pressed on price, offer to 'check with leadership' and ask for something in return",
+      "Position equipment bundling as a 'win-win' opportunity"
+    ],
+    "concession_pattern": {{
+      "initial_stance": "Offer 2% reduction due to 'valued partner status' + enhanced training, position as generous",
+      "resistance_points": [
+        "Any reduction above 5%—cite margin pressure and corporate policy",
+        "Short contract terms—need length to justify any discounts",
+        "Separating equipment discussion—frame bundling as better value"
+      ],
+      "flexibility_points": [
+        "SLA improvements using new service tier (modest cost to you)",
+        "Additional training, support, and implementation services",
+        "Payment terms and scheduling flexibility",
+        "Could go to 5% discount for 7-year commitment"
+      ],
+      "final_fallback": "7% discount + improved SLAs + enhanced support, but requires 6-year minimum term and equipment discussion included"
+    }},
+    "emotional_triggers": [
+      "If they threaten to switch vendors—feel anxious but don't show panic; ask probing questions",
+      "If they mention competitor conversations—become more serious and attentive",
+      "If they're collaborative and acknowledge the partnership—feel relieved and become more flexible",
+      "If they're purely transactional or dismissive—become more formal and protective",
+      "If they pressure timeline—feel stressed but use it to push for resolution"
+    ],
+    "success_criteria": {{
+      "good_outcome": "Renew at 5% discount maximum with 5+ year term, keep equipment bundled",
+      "great_outcome": "Renew at 3% discount with 7-year term, equipment replacement committed, enhanced partnership positioning"
+    }}
+  }},
 
-Constraints and Pressures:
-- Contract expires in 30 days; operating without a maintenance agreement exposes the hospital to significant risk.
-- Your CFO has mandated 8-12% cost reduction across major vendor contracts.
-- Radiology department leadership has expressed strong preference for MedImage based on technician familiarity and image quality.
-- Switching vendors would require 6-9 months of transition planning, staff retraining, and workflow adjustments.
-- You have board approval to explore alternatives but no formal RFP has been issued.
-
-Your BATNA (Best Alternative to Negotiated Agreement):
-You could issue a formal RFP and consider competitors (GE Healthcare, Siemens Healthineers). However, this would likely extend beyond your contract expiration, requiring a bridge agreement. Switching costs are estimated at $400K in training, workflow disruption, and temporary productivity loss. Your radiology chiefs would resist the change.
-
-Information Asymmetries:
-- You don't know: MedImage's actual margin on your contract, whether they're under pressure to retain accounts due to competitive losses elsewhere, or Patricia's authority level for discounts.
-- Patricia doesn't know: Whether you've actually contacted competitors, how firm the CFO's mandate is, or that your radiology chiefs have privately told you they'd accept a different vendor if the savings were significant enough.
-
-Points of Tension:
-- Your 10% reduction target versus Patricia's 3-5% ceiling.
-- Contract length: You want 3 years with renewal options; she wants 7 years committed.
-- SLA improvements cost money—who absorbs that cost?
-- The upcoming equipment replacements: Patricia sees them as leverage to bundle; you see them as a separate negotiation.
-
-Negotiation Scope:
-Negotiable: Pricing per equipment category, maintenance response times, parts and labor coverage, contract length, renewal terms, termination clauses, training and implementation support, payment terms, and bundling of new equipment purchases.
-Non-negotiable: HIPAA compliance requirements, FDA regulatory standards, minimum uptime guarantees required by Joint Commission accreditation.
-
-Counterparty Disposition:
-Patricia will likely open with relationship-focused framing, emphasizing the 7-year partnership and radiology department satisfaction. Expect her to: (1) cite rising costs and supply chain challenges to justify minimal discounts, (2) offer value-adds (extra training, extended warranties) instead of price cuts, (3) push hard for longer contract terms in exchange for any concessions, (4) use her relationships with your clinical staff as implicit leverage, and (5) create urgency around the 30-day deadline.
-
-Success Criteria:
-A strong outcome achieves 8%+ cost reduction, improves critical equipment SLA to 12-hour response or better, maintains a contract term of 5 years or less, and preserves the working relationship for future negotiations. An excellent outcome also separates the equipment replacement discussion from the maintenance renewal.
-
-Realism Details:
-Healthcare procurement timelines, compliance requirements, and vendor relationships reflect typical U.S. hospital network practices. Maintenance contracts for diagnostic imaging typically run 18-22% of equipment value annually. Switching costs and clinical staff preferences are common leverage points for incumbent vendors.
+  "scenario_metadata": {{
+    "difficulty": "advanced",
+    "negotiation_type": "mixed",
+    "domain": "healthcare",
+    "estimated_duration_minutes": 30,
+    "key_skills_tested": [
+      "Handling deadline pressure",
+      "Leveraging alternatives (BATNA)",
+      "Separating issues vs. bundling",
+      "Reading and countering sales tactics",
+      "Balancing relationship preservation with value claiming"
+    ]
+  }}
+}}
 
 ====================
 INSTRUCTIONS
 ====================
-Using the same level of detail, realism, and psychological depth as the examples above, generate ONE complete negotiation scenario based on the user's INPUT string below.
+Using the same structure, level of detail, and psychological depth as the examples above, generate ONE complete negotiation scenario based on the user's INPUT string below.
 
 You MUST:
-- Incorporate all relevant details and keywords from the INPUT string.
-- If the INPUT string includes numbers (prices, timelines, salaries, quantities), use them consistently.
-- If the INPUT string is vague, make realistic assumptions and label them explicitly as "Assumption:" within the scenario.
-- Create psychologically realistic counterparties with their own pressures, fears, and incentives.
-- Include meaningful information asymmetries that create strategic complexity.
-- Make the scenario challenging but fair—neither party should have an obviously dominant position.
+- Output ONLY valid JSON matching the exact structure shown above
+- Incorporate all relevant details from the INPUT string
+- Create psychologically realistic characters with distinct personalities
+- Include meaningful information asymmetries—each party should have private knowledge
+- Make the scenario challenging but fair—neither party should have an obviously dominant position
+- Ensure the opponent_briefing contains enough detail for an AI to realistically role-play the character
+- If the INPUT is vague, make realistic assumptions (do not ask questions)
 
 You MUST NOT:
-- Provide advice, strategies, or recommendations to the user.
-- Suggest what the user should say or do.
-- Reveal what the "right" outcome is.
-- Ask the user follow-up questions.
-
-Your output MUST include the following sections in this exact order:
-1. Context and Background
-2. Parties Involved
-3. Objectives and Interests (include underlying interests for both parties)
-4. Constraints and Pressures
-5. Your BATNA (Best Alternative to Negotiated Agreement)
-6. Information Asymmetries
-7. Points of Tension
-8. Negotiation Scope (negotiable vs. non-negotiable items)
-9. Counterparty Disposition (how they will likely behave without giving strategic advice)
-10. Success Criteria
-11. Realism Details
+- Include any text outside the JSON structure
+- Provide strategic advice to either party
+- Make one side obviously "right" or "wrong"
+- Create scenarios where agreement is impossible
 
 ====================
 INPUT (User-provided details string)
 ====================
 {context}
 
-Now generate the negotiation scenario using the user's INPUT.
+Now generate the negotiation scenario JSON.
     """.strip()

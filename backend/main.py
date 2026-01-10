@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 
 from app.websockets.v1.api import api_router
+from app.routes.v1.videos import videos_router
 from app.core.config import settings
 
 # Setup logging
@@ -24,6 +25,7 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix="/api/v1")
+app.include_router(videos_router, prefix="/api/v1")
 
 @app.get("/health")
 def health():

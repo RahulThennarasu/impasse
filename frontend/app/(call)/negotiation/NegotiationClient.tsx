@@ -8,6 +8,8 @@ import { CallControls } from "./CallControls";
 import { CallHeader } from "./CallHeader";
 import { OpponentOrb } from "./OpponentOrb";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
+import { UploadModal } from "@/components/UploadModal";
+import { uploadNegotiationVideo } from "@/lib/api";
 
 const coachSuggestions = [
   {
@@ -57,17 +59,22 @@ export function NegotiationClient() {
     gain?: GainNode;
   } | null>(null);
   const rafRef = useRef<number | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
   const [notes, setNotes] = useState("");
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [sessionTime] = useState(754);
+  const [sessionTime, setSessionTime] = useState(0);
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [testAudioOn, setTestAudioOn] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [spinTrigger, setSpinTrigger] = useState(0);
   const [audioLevel, setAudioLevel] = useState(0);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
+  const sessionIdRef = useRef<string>(crypto.randomUUID());
 
   const statusLabel = isThinking
     ? "Thinking"
@@ -91,6 +98,26 @@ export function NegotiationClient() {
         if (videoRef.current) {
           videoRef.current.srcObject = mediaStream;
         }
+
+        // Start recording
+        const mediaRecorder = new MediaRecorder(mediaStream, {
+          mimeType: "video/webm;codecs=vp9,opus",
+        });
+        mediaRecorderRef.current = mediaRecorder;
+        recordedChunksRef.current = [];
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            recordedChunksRef.current.push(event.data);
+          }
+        };
+
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(recordedChunksRef.current, { type: "video/webm" });
+          setRecordedBlob(blob);
+        };
+
+        mediaRecorder.start(1000); // Collect data every second
       } catch (error) {
         setMediaError("Unable to access camera or microphone.");
       }
@@ -100,11 +127,22 @@ export function NegotiationClient() {
 
     return () => {
       active = false;
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
       setStream((current) => {
         current?.getTracks().forEach((track) => track.stop());
         return null;
       });
     };
+  }, []);
+
+  // Session timer
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSessionTime((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -212,6 +250,28 @@ export function NegotiationClient() {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
+  const handleEndSession = useCallback(() => {
+    // Stop recording and trigger the onstop handler
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    // Show the upload modal
+    setIsUploadModalOpen(true);
+  }, []);
+
+  const handleUpload = useCallback(async () => {
+    if (!recordedBlob) {
+      throw new Error("No recording available");
+    }
+    await uploadNegotiationVideo(sessionIdRef.current, recordedBlob);
+  }, [recordedBlob]);
+
+  const handleNavigateToPostMortem = useCallback(() => {
+    // Stop all tracks
+    stream?.getTracks().forEach((track) => track.stop());
+    router.push("/postmortem/current-session");
+  }, [router, stream]);
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-night text-white">
       <WorkspaceSidebar
@@ -288,9 +348,17 @@ export function NegotiationClient() {
           onMutedChange={setIsMuted}
           isVideoOff={isVideoOff}
           onVideoChange={setIsVideoOff}
-          onEndSession={() => router.push("/postmortem/current-session")}
+          onEndSession={handleEndSession}
         />
       </main>
+
+      <UploadModal
+        isOpen={isUploadModalOpen}
+        onClose={handleNavigateToPostMortem}
+        onConfirmUpload={handleUpload}
+        onSkip={handleNavigateToPostMortem}
+        sessionDuration={formatTime(sessionTime)}
+      />
     </div>
   );
 }

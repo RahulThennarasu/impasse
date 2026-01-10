@@ -98,6 +98,9 @@ class NegotiationSession:
     scenario_title: Optional[str] = None
     opponent_name: Optional[str] = None
 
+    # Video recording
+    video_url: Optional[str] = None
+
     def __post_init__(self):
         """Extract useful metadata from configs."""
         self.opponent_name = self.opponent_config.get("counterparty_name", "Opponent")
@@ -312,7 +315,8 @@ class NegotiationSession:
             "transcript": self.get_transcript(),
             "user_briefing": self.user_briefing,
             "opponent_config": self.opponent_config,
-            "coach_config": self.coach_config
+            "coach_config": self.coach_config,
+            "video_url": self.video_url
         }
 
     @classmethod
@@ -333,6 +337,7 @@ class NegotiationSession:
         session.ended_at = data.get("ended_at")
         session.scenario_title = data.get("scenario_title")
         session.opponent_name = data.get("opponent_name")
+        session.video_url = data.get("video_url")
 
         # Rebuild transcript
         for entry_data in data.get("transcript", []):

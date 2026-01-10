@@ -1,0 +1,15 @@
+# Core dependencies for the negotiation practice service
+
+# API clients
+google-genai>=1.0.0  # For Gemini scenario generation
+groq>=0.4.0          # For Llama opponent/coach agents
+
+# Backend
+fastapi>=0.104.0
+uvicorn>=0.24.0
+websockets>=12.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Utilities
+python-dotenv>=1.0.0

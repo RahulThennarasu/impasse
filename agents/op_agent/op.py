@@ -4,6 +4,17 @@ from groq import Groq
 
 
 class OpponentAgent:
+    transcript: List[Dict[str, str]]
+    revealed_info: List[str]
+    context: str
+    name: str
+    objectives: str
+    interests: str
+    batna: str
+    constraints: List[str] | str
+    info_asymmetries: str
+    disposition: str
+    personality: str
     """
     AI opponent that role-plays the counterparty in a negotiation.
 

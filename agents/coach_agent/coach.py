@@ -1,6 +1,6 @@
-from groq import Groq
 import os
 from typing import List, Dict, Optional
+from groq import Groq
 
 class CoachAgent:
     """
@@ -19,6 +19,9 @@ class CoachAgent:
         - info_asymmetries: What you know vs. what they know
         """
         self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        self.model = os.getenv("GROQ_COACH_MODEL", "llama-3.3-70b-versatile")
+        self.max_tip_tokens = int(os.getenv("GROQ_COACH_TIP_TOKENS", "40"))
+        self.max_final_tokens = int(os.getenv("GROQ_COACH_FINAL_TOKENS", "120"))
         self.last_analyzed_turn = 0
 
         # Extract scenario context
@@ -114,21 +117,17 @@ Remember: You're helping them LEARN, not doing the negotiation for them."""
         # Get last 4 messages (2 exchanges) for context
         recent_messages = transcript[-4:] if len(transcript) >= 4 else transcript
 
-        # Build analysis prompt
-        messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": f"Analyze this exchange:\n\n{self._format_transcript(recent_messages)}"}
-        ]
-
-        # Call Groq
         response = self.client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
+            model=self.model,
+            messages=[
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": f"Analyze this exchange:\n\n{self._format_transcript(recent_messages)}"}
+            ],
             temperature=0.7,
-            max_tokens=120,
+            max_tokens=self.max_tip_tokens,
         )
 
-        tip = response.choices[0].message.content.strip()
+        tip = (response.choices[0].message.content or "").strip()
 
         # Update last analyzed turn
         self.last_analyzed_turn = len(transcript)
@@ -151,8 +150,7 @@ Remember: You're helping them LEARN, not doing the negotiation for them."""
         """
         Provides comprehensive performance review at the end
         """
-        messages = [
-            {"role": "system", "content": f"""You are a negotiation coach providing final performance feedback.
+        prompt = f"""You are a negotiation coach providing final performance feedback.
 
 SCENARIO CONTEXT:
 User's Objectives: {self.user_objectives}
@@ -165,15 +163,20 @@ Provide a structured performance review covering:
 3. How close they got to the success criteria
 4. One key lesson to take to their next negotiation
 
-Keep it to 4-5 sentences. Be honest but constructive."""},
-            {"role": "user", "content": f"Here's the full negotiation:\n\n{self._format_transcript(transcript)}"}
-        ]
+Keep it to 4-5 sentences. Be honest but constructive.
+
+Here's the full negotiation:
+
+{self._format_transcript(transcript)}"""
 
         response = self.client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
+            model=self.model,
+            messages=[
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": prompt}
+            ],
             temperature=0.7,
-            max_tokens=250,
+            max_tokens=self.max_final_tokens,
         )
 
-        return response.choices[0].message.content
+        return response.choices[0].message.content or ""

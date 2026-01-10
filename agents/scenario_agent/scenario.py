@@ -1,4 +1,5 @@
-from google import genai
+from groq import Groq
+import os
 import json
 import re
 from typing import Dict
@@ -7,15 +8,25 @@ from agents.scenario_agent.scenario_prompt import create_prompt
 
 # generates negotiation scenario and returns outputs for user, opponent, and coach
 def generate_scenario(context: str) -> Dict:
-    client = genai.Client()
+    client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+    model = os.getenv("GROQ_SCENARIO_MODEL", "llama-3.3-70b-versatile")
     prompt = create_prompt(context)
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash-lite",
-        contents=prompt
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {
+                "role": "system",
+                "content": "Return only valid JSON that matches the requested schema. No extra text."
+            },
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.4,
+        max_tokens=int(os.getenv("GROQ_SCENARIO_TOKENS", "900")),
     )
 
-    scenario = _parse_json_response(response.text)
+    scenario_text = response.choices[0].message.content or ""
+    scenario = _parse_json_response(scenario_text)
 
     # Transform opponent data into format OpponentAgent expects
     opponent_agent_config = _build_opponent_config(
@@ -225,4 +236,3 @@ def _parse_json_response(response_text: str) -> Dict:
             pass
 
     raise ValueError(f"Could not parse JSON from response: {response_text[:500]}...")
-

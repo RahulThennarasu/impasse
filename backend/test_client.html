@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Negotiation Test Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .container {
+            border: 1px solid #ddd;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .transcript {
+            height: 400px;
+            overflow-y: scroll;
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin: 20px 0;
+            background: #f9f9f9;
+        }
+        .message {
+            margin: 10px 0;
+            padding: 8px;
+            border-radius: 4px;
+        }
+        .user {
+            background: #e3f2fd;
+            text-align: right;
+        }
+        .opponent {
+            background: #fff3e0;
+        }
+        .coach {
+            background: #e8f5e9;
+            font-style: italic;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        #status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Negotiation Test Client</h1>
+
+        <div id="status" style="background: #ffe0e0;">Not connected</div>
+
+        <div>
+            <button id="connect">Connect</button>
+            <button id="startAudio" disabled>Start Recording</button>
+            <button id="stopAudio" disabled>Stop Recording</button>
+            <button id="endNegotiation" disabled>End Negotiation</button>
+        </div>
+
+        <div class="transcript" id="transcript"></div>
+
+        <div id="transcriptionPreview" style="color: #666; font-style: italic;"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let mediaRecorder = null;
+        let audioContext = null;
+
+        const scenario = {
+            "opponent": {
+                "context": "Engineering manager at a mid-sized SaaS company",
+                "counterparty_name": "Jordan",
+                "counterparty_objectives": "Retain you within budget",
+                "counterparty_interests": "Maintain reputation as a good manager",
+                "batna": "Salary band ceiling is $175K",
+                "constraints": "4% budget for raises, 2-week deadline",
+                "information_asymmetries": "Doesn't know about your outside offer",
+                "disposition": "Friendly but firm, will cite budget constraints",
+                "personality": "supportive yet constrained"
+            },
+            "coach": {
+                "user_objectives": "Get $185K base salary, equity refresh, Staff Engineer title",
+                "user_batna": "Outside offer at $195K but less stable company",
+                "points_of_tension": "Market rate vs internal band",
+                "negotiable_items": "Base, equity, bonus, promotion timing",
+                "success_criteria": "12%+ increase, Staff title, good relationship",
+                "info_asymmetries": "You have outside offer they don't know about"
+            }
+        };
+
+        document.getElementById('connect').addEventListener('click', async () => {
+            const sessionId = 'test-' + Date.now();
+            ws = new WebSocket(`ws://localhost:8000/api/v1/ws/negotiation/${sessionId}`);
+
+            ws.onopen = () => {
+                console.log('Connected to WebSocket');
+                // Send initialization
+                ws.send(JSON.stringify({
+                    type: 'initialize',
+                    scenario: scenario
+                }));
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                handleMessage(data);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                updateStatus('Error: ' + error, '#ffe0e0');
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket closed');
+                updateStatus('Disconnected', '#ffe0e0');
+                document.getElementById('startAudio').disabled = true;
+                document.getElementById('endNegotiation').disabled = true;
+            };
+        });
+
+        function handleMessage(data) {
+            console.log('Received:', data);
+
+            switch(data.type) {
+                case 'ready':
+                    updateStatus('Connected - Waiting for opponent...', '#fff9c4');
+                    document.getElementById('startAudio').disabled = false;
+                    document.getElementById('endNegotiation').disabled = false;
+                    break;
+
+                case 'opponent_opening':
+                    addMessage('opponent', data.text);
+                    updateStatus('Ready to negotiate', '#c8e6c9');
+                    break;
+
+                case 'transcription':
+                    document.getElementById('transcriptionPreview').textContent =
+                        `You: ${data.text}${data.is_final ? '' : '...'}`;
+                    if (data.is_final) {
+                        addMessage('user', data.text);
+                        document.getElementById('transcriptionPreview').textContent = '';
+                    }
+                    break;
+
+                case 'opponent_text':
+                    addMessage('opponent', data.text);
+                    break;
+
+                case 'coach_tip':
+                    addMessage('coach', data.text);
+                    break;
+
+                case 'audio_start':
+                    updateStatus('Opponent speaking...', '#fff9c4');
+                    break;
+
+                case 'audio_chunk':
+                    // In real app, play this audio chunk
+                    console.log('Received audio chunk');
+                    break;
+
+                case 'audio_end':
+                    updateStatus('Your turn to speak', '#c8e6c9');
+                    break;
+
+                case 'negotiation_complete':
+                    addMessage('system', `Negotiation Complete!\n\nFinal Advice: ${data.final_advice}`);
+                    updateStatus('Negotiation ended', '#ffccbc');
+                    break;
+
+                case 'error':
+                    updateStatus('Error: ' + data.message, '#ffe0e0');
+                    break;
+            }
+        }
+
+        function addMessage(type, text) {
+            const transcript = document.getElementById('transcript');
+            const msg = document.createElement('div');
+            msg.className = `message ${type}`;
+
+            let prefix = '';
+            if (type === 'opponent') prefix = '💼 Opponent: ';
+            else if (type === 'user') prefix = '👤 You: ';
+            else if (type === 'coach') prefix = '🎯 Coach: ';
+            else if (type === 'system') prefix = '📊 ';
+
+            msg.textContent = prefix + text;
+            transcript.appendChild(msg);
+            transcript.scrollTop = transcript.scrollHeight;
+        }
+
+        function updateStatus(text, color) {
+            const status = document.getElementById('status');
+            status.textContent = text;
+            status.style.background = color;
+        }
+
+        document.getElementById('startAudio').addEventListener('click', async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+                audioContext = new AudioContext({ sampleRate: 16000 });
+                const source = audioContext.createMediaStreamSource(stream);
+                const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+                source.connect(processor);
+                processor.connect(audioContext.destination);
+
+                processor.onaudioprocess = (e) => {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        const audioData = e.inputBuffer.getChannelData(0);
+                        // Convert to 16-bit PCM
+                        const int16Array = new Int16Array(audioData.length);
+                        for (let i = 0; i < audioData.length; i++) {
+                            int16Array[i] = Math.max(-1, Math.min(1, audioData[i])) * 0x7FFF;
+                        }
+                        ws.send(int16Array.buffer);
+                    }
+                };
+
+                document.getElementById('startAudio').disabled = true;
+                document.getElementById('stopAudio').disabled = false;
+                updateStatus('Recording...', '#ffccbc');
+
+            } catch (err) {
+                console.error('Error accessing microphone:', err);
+                alert('Could not access microphone: ' + err.message);
+            }
+        });
+
+        document.getElementById('stopAudio').addEventListener('click', () => {
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+            document.getElementById('startAudio').disabled = false;
+            document.getElementById('stopAudio').disabled = true;
+            updateStatus('Stopped recording', '#c8e6c9');
+        });
+
+        document.getElementById('endNegotiation').addEventListener('click', () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'end_negotiation' }));
+            }
+        });
+    </script>
+</body>
+</html>

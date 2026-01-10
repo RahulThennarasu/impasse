@@ -1,6 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
+from dotenv import load_dotenv
+import os
+
+# Load .env file from parent directory (root of project)
+env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
+load_dotenv(env_path)
 
 from app.websockets.v1.api import api_router
 from app.core.config import settings

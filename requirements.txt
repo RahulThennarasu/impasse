@@ -1,8 +1,7 @@
 # Core dependencies for the negotiation practice service
 
 # API clients
-google-genai>=1.0.0  # For Gemini scenario generation
-groq>=0.4.0          # For Llama opponent/coach agents
+groq>=0.4.0          # For Groq LLM access
 
 # Backend
 fastapi>=0.104.0

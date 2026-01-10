@@ -1,6 +1,6 @@
-from groq import Groq
 import os
 from typing import List, Dict
+from groq import Groq
 
 class OpponentAgent:
     """
@@ -22,6 +22,10 @@ class OpponentAgent:
         - personality: Communication style (friendly, aggressive, etc.)
         """
         self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        self.model = os.getenv("GROQ_OPPONENT_MODEL", "llama-3.3-70b-versatile")
+        self.max_history_messages = int(os.getenv("GROQ_OPPONENT_HISTORY", "2"))
+        self.max_opening_tokens = int(os.getenv("GROQ_OPPONENT_OPENING_TOKENS", "60"))
+        self.max_response_tokens = int(os.getenv("GROQ_OPPONENT_RESPONSE_TOKENS", "80"))
 
         # Extract scenario details
         self.context = scenario_data.get("context", "")
@@ -117,16 +121,14 @@ IMPORTANT: You are speaking out loud in a live conversation. Be natural, convers
             Remember: This is spoken dialogue. Be warm, professional, or direct based on your character.
         """
 
-        messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": opening_prompt}
-        ]
-
         response = self.client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
+            model=self.model,
+            messages=[
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": opening_prompt}
+            ],
             temperature=0.85,
-            max_tokens=150,
+            max_tokens=self.max_opening_tokens,
         )
 
         opening_message = response.choices[0].message.content or ""
@@ -143,17 +145,15 @@ IMPORTANT: You are speaking out loud in a live conversation. Be natural, convers
         # Add user message to transcript
         self.transcript.append({"role": "user", "content": user_message})
 
-        # Build messages for LLM
-        messages = [
-            {"role": "system", "content": self.system_prompt}
-        ] + self.transcript
+        history = self.transcript[-self.max_history_messages:] if self.max_history_messages > 0 else []
+        messages = [{"role": "system", "content": self.system_prompt}]
+        messages.extend(history)
 
-        # Call Groq
         response = self.client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=self.model,
             messages=messages,
             temperature=0.85,  # Slightly higher for more human-like variability
-            max_tokens=200,    # Allow slightly longer responses for complex scenarios
+            max_tokens=self.max_response_tokens,
         )
 
         opponent_response = response.choices[0].message.content or ""

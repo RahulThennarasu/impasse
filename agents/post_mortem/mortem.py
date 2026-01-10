@@ -158,13 +158,13 @@ IMPORTANT INSTRUCTIONS:
 Return ONLY valid JSON, no other text."""
 
         response = self.client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=os.getenv("GROQ_POST_MORTEM_MODEL", "llama-3.3-70b-versatile"),
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": analysis_prompt}
             ],
             temperature=0.4,  # Lower for consistent structured output
-            max_tokens=3000,
+            max_tokens=int(os.getenv("GROQ_POST_MORTEM_TOKENS", "1200")),
         )
 
         result = response.choices[0].message.content.strip()

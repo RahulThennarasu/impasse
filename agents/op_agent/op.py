@@ -2,24 +2,39 @@ from groq import Groq
 import os
 from typing import List, Dict
 
+
 class OpponentAgent:
     """
-    Enhanced opponent agent that uses full scenario context.
-    Now accepts the rich scenario output from scenario_prompt.py
+    AI opponent that role-plays the counterparty in a negotiation.
+
+    This agent generates responses based on scenario context but does NOT
+    own the transcript. The NegotiationSession manages the canonical transcript.
+
+    Usage:
+        opponent = OpponentAgent(opponent_config)
+
+        # Get opening message
+        opening = opponent.get_opening_message()
+        session.add_opening_message(opening)
+
+        # During negotiation
+        response = opponent.get_response(session.get_llm_transcript())
+        session.add_opponent_message(response, latency_ms=320)
     """
 
     def __init__(self, scenario_data: Dict):
         """
-        scenario_data should contain:
-        - context: Background context
-        - counterparty_name: Name/role of the opponent
-        - counterparty_objectives: Their goals
-        - counterparty_interests: WHY they care (deeper motivations)
-        - batna: Their walkaway alternative
-        - constraints: Deadlines, budgets, external pressures
-        - information_asymmetries: What they know that you don't
-        - disposition: Their likely tactics and behavior
-        - personality: Communication style (friendly, aggressive, etc.)
+        Args:
+            scenario_data: Configuration dict containing:
+                - context: Background context
+                - counterparty_name: Name/role of the opponent
+                - counterparty_objectives: Their goals
+                - counterparty_interests: WHY they care (deeper motivations)
+                - batna: Their walkaway alternative
+                - constraints: Deadlines, budgets, external pressures
+                - information_asymmetries: What they know that user doesn't
+                - disposition: Their likely tactics and behavior
+                - personality: Communication style (friendly, aggressive, etc.)
         """
         self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
@@ -34,17 +49,11 @@ class OpponentAgent:
         self.disposition = scenario_data.get("disposition", "")
         self.personality = scenario_data.get("personality", "neutral")
 
-        # Track what you've revealed during the negotiation
-        self.revealed_info = []
-
-        # Conversation history
-        self.transcript = []
-
-        # Build system prompt with all this context
+        # Build system prompt
         self.system_prompt = self._build_system_prompt()
 
     def _build_system_prompt(self) -> str:
-        """Creates rich system prompt using full scenario context"""
+        """Creates rich system prompt using full scenario context."""
         return f"""You are roleplaying as {self.name} in a realistic negotiation scenario.
 
 CONTEXT:
@@ -104,67 +113,65 @@ CRITICAL INSTRUCTIONS:
 
 IMPORTANT: You are speaking out loud in a live conversation. Be natural, conversational, and psychologically realistic."""
 
-    # generates opponent's opening message to start the negotiation
     def get_opening_message(self) -> str:
+        """
+        Generate the opponent's opening line to start the negotiation.
+
+        Returns:
+            The opening message text
+        """
         opening_prompt = f"""Generate your opening line to start this negotiation. You are {self.name}.
 
-            This is the very first thing you say when the other party walks in or the meeting begins.
-            - Greet them appropriately for the relationship and setting
-            - Set the tone based on your personality
-            - You may hint at the agenda or your initial position, but don't dive into specifics yet
-            - Keep it natural and brief (1-2 sentences)
+This is the very first thing you say when the other party walks in or the meeting begins.
+- Greet them appropriately for the relationship and setting
+- Set the tone based on your personality
+- You may hint at the agenda or your initial position, but don't dive into specifics yet
+- Keep it natural and brief (1-2 sentences)
 
-            Remember: This is spoken dialogue. Be warm, professional, or direct based on your character.
+Remember: This is spoken dialogue. Be warm, professional, or direct based on your character."""
+
+        response = self.client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": opening_prompt}
+            ],
+            temperature=0.85,
+            max_tokens=150,
+        )
+
+        return response.choices[0].message.content or ""
+
+    def get_response(self, transcript: List[Dict]) -> str:
         """
+        Generate opponent's response based on conversation history.
 
-        messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": opening_prompt}
-        ]
+        Args:
+            transcript: List of messages in LLM format:
+                [{"role": "user"|"assistant", "content": "..."}]
+
+        Returns:
+            The opponent's response text
+        """
+        # Build messages for LLM: system prompt + conversation history
+        messages = [{"role": "system", "content": self.system_prompt}] + transcript
 
         response = self.client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=messages,
             temperature=0.85,
-            max_tokens=150,
+            max_tokens=200,
         )
 
-        opening_message = response.choices[0].message.content or ""
-
-        # Add to transcript as assistant's first message
-        self.transcript.append({"role": "assistant", "content": opening_message})
-
-        return opening_message
-
-    def get_response(self, user_message: str) -> str:
-        """
-        Generates opponent's response to user's message
-        """
-        # Add user message to transcript
-        self.transcript.append({"role": "user", "content": user_message})
-
-        # Build messages for LLM
-        messages = [
-            {"role": "system", "content": self.system_prompt}
-        ] + self.transcript
-
-        # Call Groq
-        response = self.client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
-            temperature=0.85,  # Slightly higher for more human-like variability
-            max_tokens=200,    # Allow slightly longer responses for complex scenarios
-        )
-
-        opponent_response = response.choices[0].message.content or ""
-
-        # Add to transcript
-        self.transcript.append({"role": "assistant", "content": opponent_response})
-
-        return opponent_response
+        return response.choices[0].message.content or ""
 
     def get_hidden_state(self) -> Dict:
-        """Returns full hidden state for post-mortem analysis"""
+        """
+        Returns full hidden state for post-mortem analysis.
+
+        This reveals what the opponent was "really thinking" - their true
+        constraints, objectives, and planned tactics.
+        """
         return {
             "name": self.name,
             "objectives": self.objectives,

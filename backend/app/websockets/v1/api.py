@@ -3,6 +3,8 @@ import logging
 from typing import Dict, Optional
 import json
 
+from agents.scenario_agent.scenario import generate_scenario
+
 logger = logging.getLogger(__name__)
 
 api_router = APIRouter()
@@ -182,12 +184,9 @@ async def update_scenario_info(session_id: str, scenario_info: str):
     if not session:
         return {"error": "Session not found", "session_id": session_id}
     
-    session["scenario_info"] = scenario_info
+    scenario_para = generate_scenario(scenario_info)
     logger.info(f"Session {session_id}: Scenario info updated")
     
     return {
-        "session_id": session_id,
-        "scenario_info": scenario_info,
-        "message": "Scenario information updated successfully"
+        scenario_para
     }
-

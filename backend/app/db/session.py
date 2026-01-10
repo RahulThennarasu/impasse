@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
+import os
 
 class Settings(BaseSettings):
     database_url: str = os.getenv("SUPABASE_DB_URL")

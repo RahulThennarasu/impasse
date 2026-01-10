@@ -2,10 +2,14 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import logging
 from typing import Dict, Optional
 import json
+from .negotiation import negotiation_router
 
 logger = logging.getLogger(__name__)
 
 api_router = APIRouter()
+
+# Include negotiation router
+api_router.include_router(negotiation_router, tags=["negotiation"])
 
 # Store active video call sessions
 # Structure: {session_id: {user: websocket, agent_id: agent_data}}

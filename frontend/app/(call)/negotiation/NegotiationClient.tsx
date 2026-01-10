@@ -1,44 +1,34 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@headlessui/react";
 import { Maximize2 } from "lucide-react";
 import { CallControls } from "./CallControls";
 import { CallHeader } from "./CallHeader";
 import { OpponentOrb } from "./OpponentOrb";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
-import { UploadModal } from "@/components/UploadModal";
-import { uploadNegotiationVideo } from "@/lib/api";
+import {
+  getWsBaseUrl,
+  requestPostMortem,
+  type CoachTip,
+  type ScenarioContext,
+} from "@/lib/api";
 
-const coachSuggestions = [
+const initialCoachSuggestions: CoachTip[] = [
   {
-    id: 1,
+    id: "tip-1",
     text: "Good rapport building. They're receptive to your approach.",
     time: "Just now",
     priority: "high",
     category: "Rapport",
   },
   {
-    id: 2,
+    id: "tip-2",
     text: "Consider slowing your pace. Pauses show confidence.",
     time: "2 min ago",
     priority: "medium",
     category: "Delivery",
-  },
-  {
-    id: 3,
-    text: "They're showing interest. This is a good moment to anchor high.",
-    time: "5 min ago",
-    priority: "high",
-    category: "Strategy",
-  },
-  {
-    id: 4,
-    text: "Watch their body language. They seem hesitant about pricing.",
-    time: "7 min ago",
-    priority: "medium",
-    category: "Observation",
   },
 ];
 
@@ -48,19 +38,37 @@ const keyPoints = [
   { label: "Confidence", value: "High", trend: "up" as const },
 ];
 
+const blobToBase64 = (blob: Blob) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result;
+      if (typeof result === "string") {
+        const [, base64] = result.split(",");
+        resolve(base64 ?? "");
+      } else {
+        reject(new Error("Failed to read blob"));
+      }
+    };
+    reader.onerror = () => reject(new Error("Failed to read blob"));
+    reader.readAsDataURL(blob);
+  });
+
 export function NegotiationClient() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const sessionId = searchParams.get("sessionId") ?? "";
+  const agentId = searchParams.get("agentId") ?? "opponent";
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const audioNodesRef = useRef<{
-    mediaSource?: MediaElementAudioSourceNode;
-    gain?: GainNode;
-  } | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const videoTimerRef = useRef<number | null>(null);
   const rafRef = useRef<number | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const recordedChunksRef = useRef<Blob[]>([]);
+
   const [notes, setNotes] = useState("");
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
@@ -69,20 +77,38 @@ export function NegotiationClient() {
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [testAudioOn, setTestAudioOn] = useState(false);
-  const [isThinking, setIsThinking] = useState(false);
+  const [debugThinking, setDebugThinking] = useState(false);
   const [spinTrigger, setSpinTrigger] = useState(0);
   const [audioLevel, setAudioLevel] = useState(0);
-  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
-  const sessionIdRef = useRef<string>(crypto.randomUUID());
+  const [agentActivity, setAgentActivity] = useState(0);
+  const [agentStatus, setAgentStatus] = useState<"idle" | "thinking" | "speaking" | "disconnected">(
+    "disconnected"
+  );
+  const [coachSuggestions, setCoachSuggestions] = useState<CoachTip[]>(initialCoachSuggestions);
+  const [scenario, setScenario] = useState<ScenarioContext | null>(null);
 
-  const statusLabel = isThinking
-    ? "Thinking"
-    : testAudioOn && audioLevel > 0.06
-      ? "Speaking"
-      : testAudioOn
-        ? "Listening"
-        : "Idle";
+  const activeLevel = testAudioOn ? audioLevel : agentActivity;
+  const isThinking = agentStatus === "thinking" || debugThinking;
+  const statusLabel =
+    agentStatus === "disconnected"
+      ? "Disconnected"
+      : agentStatus === "thinking"
+        ? "Thinking"
+        : agentStatus === "speaking"
+          ? "Speaking"
+          : "Idle";
+
+  useEffect(() => {
+    if (!sessionId) return;
+    const stored = sessionStorage.getItem(`scenario:${sessionId}`);
+    if (stored) {
+      try {
+        setScenario(JSON.parse(stored));
+      } catch {
+        setScenario(null);
+      }
+    }
+  }, [sessionId]);
 
   useEffect(() => {
     let active = true;
@@ -170,7 +196,7 @@ export function NegotiationClient() {
       await audioContextRef.current.resume();
       try {
         await audioRef.current?.play();
-      } catch (error) {
+      } catch {
         setMediaError("Unable to play test audio. Check your browser permissions.");
       }
       return;
@@ -186,11 +212,10 @@ export function NegotiationClient() {
     analyser.connect(context.destination);
     audioContextRef.current = context;
     analyserRef.current = analyser;
-    audioNodesRef.current = { mediaSource, gain };
     await context.resume();
     try {
       await audioRef.current.play();
-    } catch (error) {
+    } catch {
       setMediaError("Unable to play test audio. Check your browser permissions.");
     }
   }, []);
@@ -200,12 +225,11 @@ export function NegotiationClient() {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
     }
-    audioNodesRef.current = null;
-    analyserRef.current = null;
     if (audioContextRef.current) {
       audioContextRef.current.close();
       audioContextRef.current = null;
     }
+    analyserRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -244,6 +268,153 @@ export function NegotiationClient() {
     };
   }, [testAudioOn]);
 
+  useEffect(() => {
+    if (!sessionId) return;
+    const wsUrl = `${getWsBaseUrl()}/api/v1/ws/video/call/${sessionId}/${agentId}`;
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      setAgentStatus("idle");
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === "call_status" && data.status === "connected") {
+          setAgentStatus("idle");
+        }
+        if (data.type === "call_status") {
+          if (data.status === "connected") {
+            setAgentStatus("idle");
+          }
+          if (data.status === "ended") {
+            setAgentStatus("disconnected");
+          }
+        }
+        if (data.type === "agent_response") {
+          setAgentStatus("thinking");
+        }
+        if (data.type === "message_received") {
+          setCoachSuggestions((prev) => [
+            {
+              id: `coach-${Date.now()}`,
+              text: `You: ${data.message ?? "Message sent"}`,
+              time: "now",
+              priority: "low",
+              category: "Transcript",
+            },
+            ...prev,
+          ]);
+        }
+        if (data.type === "transcript" && Array.isArray(data.transcript)) {
+          const latest = data.transcript.at(-1);
+          if (latest?.message) {
+            setCoachSuggestions((prev) => [
+              {
+                id: `coach-${Date.now()}`,
+                text: `${latest.role ?? "user"}: ${latest.message}`,
+                time: "now",
+                priority: "low",
+                category: "Transcript",
+              },
+              ...prev,
+            ]);
+          }
+        }
+        if (data.type === "agent_audio" && data.audio_base64) {
+          const audio = new Audio(`data:audio/wav;base64,${data.audio_base64}`);
+          setAgentStatus("speaking");
+          setAgentActivity(0.9);
+          audio.onended = () => {
+            setAgentStatus("idle");
+            setAgentActivity(0);
+          };
+          audio.play().catch(() => {
+            setAgentStatus("idle");
+            setAgentActivity(0);
+          });
+        }
+      } catch {
+        setMediaError("Received malformed socket message.");
+      }
+    };
+
+    ws.onclose = () => {
+      setAgentStatus("disconnected");
+    };
+
+    return () => {
+      ws.close();
+      wsRef.current = null;
+    };
+  }, [sessionId, agentId]);
+
+  useEffect(() => {
+    if (!stream || !wsRef.current) return;
+    const ws = wsRef.current;
+    const sendIfOpen = (payload: Record<string, unknown>) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(payload));
+      }
+    };
+
+    const audioTracks = stream.getAudioTracks();
+    if (audioTracks.length) {
+      const audioStream = new MediaStream(audioTracks);
+      const recorder = new MediaRecorder(audioStream, {
+        mimeType: "audio/webm;codecs=opus",
+      });
+      recorderRef.current = recorder;
+      recorder.ondataavailable = async (event) => {
+        if (event.data.size === 0) return;
+        try {
+          const base64 = await blobToBase64(event.data);
+          sendIfOpen({ type: "audio_data", data: base64 });
+        } catch {
+          setMediaError("Failed to encode audio stream.");
+        }
+      };
+      recorder.start(500);
+    }
+
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    const sendFrame = () => {
+      if (!videoRef.current || !ctx) return;
+      const video = videoRef.current;
+      if (video.videoWidth === 0) return;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.6);
+      sendIfOpen({ type: "video_frame", data: dataUrl });
+    };
+    videoTimerRef.current = window.setInterval(sendFrame, 350);
+
+    return () => {
+      recorderRef.current?.stop();
+      recorderRef.current = null;
+      if (videoTimerRef.current) {
+        window.clearInterval(videoTimerRef.current);
+      }
+    };
+  }, [stream]);
+
+  const handleEndSession = async () => {
+    if (wsRef.current) {
+      wsRef.current.send(JSON.stringify({ type: "end_call" }));
+    }
+    if (sessionId) {
+      try {
+        await requestPostMortem(sessionId);
+      } catch {
+        setMediaError("Failed to request post-mortem analysis.");
+      }
+    }
+    router.push(`/postmortem/${sessionId || "current-session"}`);
+  };
+
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -272,6 +443,11 @@ export function NegotiationClient() {
     router.push("/postmortem/current-session");
   }, [router, stream]);
 
+  const headerTitle = scenario?.title ?? "Negotiation Session";
+  const headerSubtitle = scenario
+    ? `Role: ${scenario.role} • ${scenario.description}`
+    : "Opponent: AI Agent • Scenario loading";
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-night text-white">
       <WorkspaceSidebar
@@ -297,11 +473,13 @@ export function NegotiationClient() {
 
         <CallHeader
           timeLabel={formatTime(sessionTime)}
+          title={headerTitle}
+          subtitle={headerSubtitle}
           testAudioOn={testAudioOn}
           onTestAudioChange={setTestAudioOn}
           isThinking={isThinking}
           onThinkingChange={(next) => {
-            setIsThinking(next);
+            setDebugThinking(next);
             if (next) {
               setSpinTrigger((prev) => prev + 1);
             }
@@ -333,7 +511,7 @@ export function NegotiationClient() {
             isThinking={isThinking}
             spinTrigger={spinTrigger}
             statusLabel={statusLabel}
-            audioLevel={audioLevel}
+            audioLevel={activeLevel}
           />
 
           {mediaError ? (

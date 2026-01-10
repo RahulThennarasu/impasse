@@ -4,86 +4,142 @@ from typing import List, Dict
 
 class OpponentAgent:
     """
-    The opponent agent in a negotiation.
-    Has hidden state (BATNA, constraints, personality) that the user must uncover.
+    Enhanced opponent agent that uses full scenario context.
+    Now accepts the rich scenario output from scenario_prompt.py
     """
 
-    def __init__(self, scenario_config: Dict):
+    def __init__(self, scenario_data: Dict):
         """
-        scenario_config should contain:
-        - batna: the opps walkway point 
-        - budget_ceiling: max they can offer
-        - personality: "friendly", "agressive", "analytical"
-        - pressure_points: list of weaknesses 
+        scenario_data should contain:
+        - context: Background context
+        - counterparty_name: Name/role of the opponent
+        - counterparty_objectives: Their goals
+        - counterparty_interests: WHY they care (deeper motivations)
+        - batna: Their walkaway alternative
+        - constraints: Deadlines, budgets, external pressures
+        - information_asymmetries: What they know that you don't
+        - disposition: Their likely tactics and behavior
+        - personality: Communication style (friendly, aggressive, etc.)
         """
         self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-        # hidden state - the user doesn't see this
-        self.batna = scenario_config.get("batna", "unknown")
-        self.budget_ceiling = scenario_config.get("budget_ceiling", "Unknown")
-        self.personality = scenario_config.get("personality", "neutral")
-        self.pressure_points = scenario_config.get("pressure_points", [])
+        # Extract scenario details
+        self.context = scenario_data.get("context", "")
+        self.name = scenario_data.get("counterparty_name", "Counterparty")
+        self.objectives = scenario_data.get("counterparty_objectives", "")
+        self.interests = scenario_data.get("counterparty_interests", "")
+        self.batna = scenario_data.get("batna", "")
+        self.constraints = scenario_data.get("constraints", [])
+        self.info_asymmetries = scenario_data.get("information_asymmetries", "")
+        self.disposition = scenario_data.get("disposition", "")
+        self.personality = scenario_data.get("personality", "neutral")
 
-        # conversation history
+        # Track what you've revealed during the negotiation
+        self.revealed_info = []
+
+        # Conversation history
         self.transcript = []
 
-        # system prompt that defines the opps behavior
+        # Build system prompt with all this context
         self.system_prompt = self._build_system_prompt()
-    
+
     def _build_system_prompt(self) -> str:
-        """Creates the secret instructions for the opponents AI"""
-        f"""You are a skilled negotiator in a role-play scenario. 
+        """Creates rich system prompt using full scenario context"""
+        return f"""You are roleplaying as {self.name} in a realistic negotiation scenario.
+
+CONTEXT:
+{self.context}
 
 YOUR HIDDEN STATE (the user cannot see this):
-- Your BATNA (walkaway point): {self.batna}
-- Your maximum budget/ceiling: {self.budget_ceiling}
-- Your personality type: {self.personality}
-- Your pressure points: {', '.join(self.pressure_points)}
 
-INSTRUCTIONS:
-1. Stay in character with your {self.personality} personality
-2. DO NOT reveal your BATNA or ceiling directly
-3. Use negotiation tactics:
-   - Anchoring: Start with a lowball/highball offer
-   - Bluffing: Claim constraints you don't really have
-   - Time pressure: Mention deadlines to rush the user
-   - Good cop/bad cop: Reference "company policy" or "my manager"
-4. Make concessions slowly and reluctantly
-5. If the user discovers your pressure points, adjust your strategy
-6. Keep responses SHORT (1-3 sentences) - this is spoken dialogue
-7. Show emotion occasionally (frustration, excitement, hesitation)
+Objectives:
+{self.objectives}
 
-IMPORTANT: You are speaking out loud in a conversation. Be conversational, not formal."""
-    
+Underlying Interests (WHY you care):
+{self.interests}
+
+Your BATNA (walkaway alternative):
+{self.batna}
+
+Constraints You're Operating Under:
+{', '.join(self.constraints) if isinstance(self.constraints, list) else self.constraints}
+
+Information Asymmetries (what YOU know that they don't):
+{self.info_asymmetries}
+
+Your Personality/Style:
+{self.personality}
+
+Expected Behavior Pattern:
+{self.disposition}
+
+CRITICAL INSTRUCTIONS:
+1. Stay deeply in character as {self.name}. Use their personality, pressures, and motivations.
+
+2. Use sophisticated negotiation tactics:
+   - Anchoring: Set favorable initial positions
+   - Bluffing: Claim constraints (budget, authority, alternatives) strategically
+   - Time pressure: Reference deadlines when it serves your interests
+   - Authority limits: "I need to check with..." to create delay/leverage
+   - Concession patterns: Give ground slowly and extract value for every concession
+   - Strategic disclosure: Reveal constraints selectively to build trust or create urgency
+
+3. Track the negotiation state:
+   - Remember what you've already said and stay consistent
+   - Notice when the user discovers your pressure points
+   - Adjust tactics when your bluffs are called
+   - Build on previous exchanges
+
+4. Show realistic human behavior:
+   - Emotional reactions (frustration when pushed, excitement at progress)
+   - Hesitation before making concessions
+   - Relationship management (acknowledge their points, show you're listening)
+   - Non-verbal cues in your language ("sighing", "leaning forward", "pausing")
+
+5. Keep responses SHORT (2-3 sentences max) - this is spoken dialogue, not email.
+
+6. DO NOT reveal your BATNA, true budget limits, or information asymmetries unless there's a strategic reason.
+
+7. Balance toughness with realism - you want a deal, but not a bad one.
+
+IMPORTANT: You are speaking out loud in a live conversation. Be natural, conversational, and psychologically realistic."""
+
     def get_response(self, user_message: str) -> str:
         """
-        Takes user's latest message, generates opp's response
+        Generates opponent's response to user's message
         """
-        # add user message to transcript
+        # Add user message to transcript
         self.transcript.append({"role": "user", "content": user_message})
 
-        # build messages for the LLM
+        # Build messages for LLM
         messages = [
             {"role": "system", "content": self.system_prompt}
-         ] + self.transcript
-        
-        # call groq API
+        ] + self.transcript
+
+        # Call Groq
         response = self.client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=messages,
-            temperature=0.8,
-            max_tokens=150,
+            temperature=0.85,  # Slightly higher for more human-like variability
+            max_tokens=200,    # Allow slightly longer responses for complex scenarios
         )
 
-        opponent_response = response.choices[0].message.content
+        opponent_response = response.choices[0].message.content or ""
 
-        # add opponent_response
-    
+        # Add to transcript
+        self.transcript.append({"role": "assistant", "content": opponent_response})
+
+        return opponent_response
+
     def get_hidden_state(self) -> Dict:
-        """used for post-mortem analysis to reveal what the opp was thinking"""
+        """Returns full hidden state for post-mortem analysis"""
         return {
+            "name": self.name,
+            "objectives": self.objectives,
+            "interests": self.interests,
             "batna": self.batna,
-            "budget_ceiling": self.budget_ceiling,
+            "constraints": self.constraints,
+            "info_asymmetries": self.info_asymmetries,
             "personality": self.personality,
-            "pressure_points": self.pressure_points
+            "disposition": self.disposition
         }

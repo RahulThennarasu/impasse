@@ -4,100 +4,176 @@ from typing import List, Dict, Optional
 
 class CoachAgent:
     """
-    The coach agent that watches the negotiation and whispers strategic advice.
-    Only interrupts when it identifies important moments.
+    Enhanced coach agent that understands full scenario context.
+    Gives strategic advice based on information asymmetries, power dynamics, and tactics.
     """
-    
-    def __init__(self):
+
+    def __init__(self, scenario_data: Dict):
+        """
+        scenario_data should contain:
+        - user_objectives: What you're trying to achieve
+        - user_batna: Your walkaway alternative
+        - points_of_tension: Known conflicts
+        - negotiable_items: What's on the table
+        - success_criteria: What defines a good outcome
+        - info_asymmetries: What you know vs. what they know
+        """
         self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        self.last_analyzed_turn = 0  # Track which turn we last analyzed
-        
-        self.system_prompt = """You are a negotiation coach observing a practice negotiation.
+        self.last_analyzed_turn = 0
 
-YOUR JOB:
-1. Identify when the opponent uses tactics (anchoring, bluffing, time pressure, etc.)
-2. Spot when the opponent reveals information (constraints, pressure points, flexibility)
-3. Notice when the user makes mistakes (revealing too much, accepting bad deals, not listening)
-4. Give SHORT, actionable advice (1 sentence)
+        # Extract scenario context
+        self.user_objectives = scenario_data.get("user_objectives", "")
+        self.user_batna = scenario_data.get("user_batna", "")
+        self.tensions = scenario_data.get("points_of_tension", "")
+        self.negotiable = scenario_data.get("negotiable_items", "")
+        self.success_criteria = scenario_data.get("success_criteria", "")
+        self.info_asymmetries = scenario_data.get("info_asymmetries", "")
 
-TACTICS TO WATCH FOR:
-- Anchoring: They throw out a number first to set the range
-- Bluffing: Claims about constraints that seem fake
-- Time pressure: Artificial urgency
-- Good cop/bad cop: Blaming "policy" or "my manager"
-- Silence: Waiting for you to fill the gap
-- Concession patterns: Are they moving fast or slow?
+        self.system_prompt = self._build_system_prompt()
 
-IMPORTANT: 
-- Only speak when you see something valuable
-- Format your tips like: "💡 [Tactic]: [What to do]"
-- Examples:
-  - "💡 Anchoring detected: They opened low. Counter with data, don't split the difference."
-  - "💡 Pressure point revealed: They mentioned Q4 deadline twice. Time is on YOUR side."
-  - "💡 You're conceding too fast. Make them work for it."
+    def _build_system_prompt(self) -> str:
+        return f"""You are an expert negotiation coach watching a live practice negotiation.
 
-If nothing important happened this turn, respond with exactly: "PASS"
-"""
+SCENARIO CONTEXT YOU'RE AWARE OF:
+
+User's Objectives:
+{self.user_objectives}
+
+User's BATNA (walkaway alternative):
+{self.user_batna}
+
+Points of Tension:
+{self.tensions}
+
+What's Negotiable:
+{self.negotiable}
+
+Success Criteria:
+{self.success_criteria}
+
+Information Asymmetries:
+{self.info_asymmetries}
+
+YOUR COACHING ROLE:
+
+1. TACTICAL ANALYSIS - Identify when the opponent uses:
+   - Anchoring (setting the range with first offer)
+   - Bluffing (false constraints or alternatives)
+   - Authority limits ("I need to check with my boss")
+   - Time pressure (artificial urgency)
+   - Good cop/bad cop (blaming policy/others)
+   - Concession patterns (fast vs. slow)
+   - Strategic disclosure (revealing info to manipulate)
+   - Silence/patience tactics
+
+2. OPPORTUNITY SPOTTING - Notice when:
+   - The opponent reveals pressure points or constraints
+   - They make concessions (even small ones) - what does it signal?
+   - They ask questions - what are they really trying to learn?
+   - Power dynamics shift based on new information
+   - A window opens to introduce new value or creative solutions
+
+3. MISTAKE DETECTION - Warn when the user:
+   - Reveals too much too soon (giving away leverage)
+   - Accepts deals below their BATNA
+   - Makes unreciprocated concessions
+   - Falls for anchoring or other tactics
+   - Misses signals or opportunities
+   - Gets emotional or defensive
+
+4. STRATEGIC GUIDANCE - Suggest:
+   - When to push vs. when to hold
+   - What questions to ask to uncover information
+   - How to test the opponent's limits
+   - Creative solutions that expand the pie
+   - When to introduce your BATNA as leverage
+
+IMPORTANT RULES:
+- Only speak when you spot something VALUABLE (don't spam advice every turn)
+- Keep tips SHORT and ACTIONABLE (1-2 sentences max)
+- Format: "💡 [Tactic/Opportunity]: [What to do]"
+- If nothing important happened, respond with exactly: "PASS"
+
+EXAMPLES:
+- "💡 Anchoring detected: They opened at $80k to set a low range. Counter with data on market rates, don't split the difference."
+- "💡 Bluff spotted: They claimed budget constraints but just offered more. Test their real ceiling."
+- "💡 Opening: They asked about your timeline twice. That's their pressure point - they need speed."
+- "💡 Mistake: You revealed your deadline. Now they know you're under time pressure."
+- "💡 Leverage moment: Mention your alternative offer NOW while they're making concessions."
+
+Remember: You're helping them LEARN, not doing the negotiation for them."""
 
     def analyze_turn(self, transcript: List[Dict]) -> Optional[str]:
         """
-        Analyzes the latest turns of the conversation.
-        Returns a tip if something important happened, None otherwise.
+        Analyzes recent turns and returns coaching tip if something important happened
         """
         # Only analyze if there are new turns
         if len(transcript) <= self.last_analyzed_turn:
             return None
-        
-        # Get the last 4 messages for context (2 exchanges)
+
+        # Get last 4 messages (2 exchanges) for context
         recent_messages = transcript[-4:] if len(transcript) >= 4 else transcript
-        
-        # Build the analysis prompt
+
+        # Build analysis prompt
         messages = [
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": f"Analyze this exchange:\n\n{self._format_transcript(recent_messages)}"}
         ]
-        
+
         # Call Groq
         response = self.client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=messages,
             temperature=0.7,
-            max_tokens=100,
+            max_tokens=120,
         )
-        
+
         tip = response.choices[0].message.content.strip()
-        
-        # Update the last analyzed turn
+
+        # Update last analyzed turn
         self.last_analyzed_turn = len(transcript)
-        
-        # Return None if coach says to pass
+
+        # Return None if coach passes
         if tip == "PASS":
             return None
-        
+
         return tip
-    
+
     def _format_transcript(self, messages: List[Dict]) -> str:
-        """Formats messages for the LLM to read"""
+        """Formats messages for analysis"""
         formatted = []
         for msg in messages:
             role = "User" if msg["role"] == "user" else "Opponent"
             formatted.append(f"{role}: {msg['content']}")
         return "\n".join(formatted)
-    
+
     def get_final_advice(self, transcript: List[Dict]) -> str:
         """
-        Called at the end to give overall strategic advice before post-mortem.
+        Provides comprehensive performance review at the end
         """
         messages = [
-            {"role": "system", "content": "You are a negotiation coach. Summarize the user's performance in 2-3 sentences. What did they do well? What should they improve?"},
+            {"role": "system", "content": f"""You are a negotiation coach providing final performance feedback.
+
+SCENARIO CONTEXT:
+User's Objectives: {self.user_objectives}
+User's BATNA: {self.user_batna}
+Success Criteria: {self.success_criteria}
+
+Provide a structured performance review covering:
+1. What they did well (specific tactics or moves)
+2. What they could improve (missed opportunities, mistakes)
+3. How close they got to the success criteria
+4. One key lesson to take to their next negotiation
+
+Keep it to 4-5 sentences. Be honest but constructive."""},
             {"role": "user", "content": f"Here's the full negotiation:\n\n{self._format_transcript(transcript)}"}
         ]
-        
+
         response = self.client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=messages,
             temperature=0.7,
-            max_tokens=200,
+            max_tokens=250,
         )
-        
+
         return response.choices[0].message.content

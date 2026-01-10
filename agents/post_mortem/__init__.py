@@ -1,1 +1,2 @@
-# Post-mortem agent (not yet implemented)
+# Post-mortem agent
+from .mortem import PostMortemAgent

@@ -99,13 +99,13 @@ export function OpponentOrb({
     <div className="absolute left-8 top-24 flex flex-col items-start gap-3">
       <div className="relative h-28 w-28 overflow-hidden rounded-full bg-black/90">
         <div
-          className="absolute inset-0 rounded-full bg-[#7fb069]/20 blur-2xl"
+          className="absolute inset-0 rounded-full bg-olive-20 blur-2xl"
           style={{ transform: `scale(${0.75 + audioLevel * 0.5})` }}
         />
         {isThinking ? (
           <motion.div
             key={spinTrigger}
-            className="absolute inset-2 rounded-full border border-[#c5e5b4]/40"
+            className="absolute inset-2 rounded-full border border-olive-soft-40"
             animate={{ opacity: [0.2, 0.6, 0.2] }}
             transition={{ duration: 1.1, ease: "easeInOut", repeat: 2 }}
           />
@@ -129,7 +129,7 @@ export function OpponentOrb({
             return (
               <div
                 key={particle.id}
-                className="absolute left-1/2 top-1/2 rounded-full bg-[#c5e5b4]"
+                className="absolute left-1/2 top-1/2 rounded-full bg-olive-soft"
                 style={{
                   width: particle.size * sizeBoost,
                   height: particle.size * sizeBoost,

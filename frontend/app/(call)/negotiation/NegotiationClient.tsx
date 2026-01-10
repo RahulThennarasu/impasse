@@ -211,7 +211,7 @@ export function NegotiationClient() {
   };
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#0a0a0a] text-white">
+    <div className="flex h-screen w-screen overflow-hidden bg-night text-white">
       <WorkspaceSidebar
         isSidebarOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
@@ -260,7 +260,7 @@ export function NegotiationClient() {
             </div>
           ) : null}
           <div className="absolute left-8 top-6 flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs font-semibold text-white backdrop-blur">
-            <span className="h-2 w-2 rounded-full bg-[#c5e5b4] shadow-[0_0_8px_#c5e5b4]" />
+            <span className="h-2 w-2 rounded-full bg-olive-soft shadow-olive-glow" />
             LIVE
           </div>
           <div className="absolute right-8 top-6 rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs font-semibold text-white backdrop-blur">
@@ -275,7 +275,7 @@ export function NegotiationClient() {
           />
 
           {mediaError ? (
-            <div className="absolute bottom-28 left-1/2 -translate-x-1/2 rounded-full bg-[#c25a5a] px-4 py-2 text-xs font-semibold text-white shadow-lg">
+            <div className="absolute bottom-28 left-1/2 -translate-x-1/2 rounded-full bg-danger-muted px-4 py-2 text-xs font-semibold text-white shadow-lg">
               {mediaError}
             </div>
           ) : null}

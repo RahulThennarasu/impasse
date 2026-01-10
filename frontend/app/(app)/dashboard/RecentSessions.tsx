@@ -45,12 +45,12 @@ export function RecentSessions() {
     <section className="mx-auto max-w-6xl px-6 pb-20 lg:max-w-[1400px]">
       <div className="mt-14 flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-serif text-[#1a1a1a]">Recent sessions</h2>
-          <p className="mt-2 text-sm text-[#666]">Review your latest negotiations.</p>
+          <h2 className="text-3xl font-serif text-ink">Recent sessions</h2>
+          <p className="mt-2 text-sm text-muted">Review your latest negotiations.</p>
         </div>
         <Link
           href="/library"
-          className="rounded-full border-2 border-black/10 bg-white px-5 py-2 text-sm font-semibold text-[#1a1a1a] transition hover:border-black/20 hover:bg-black/5"
+          className="rounded-full border-2 border-black/10 bg-white px-5 py-2 text-sm font-semibold text-ink transition hover:border-black/20 hover:bg-black/5"
         >
           Explore library
         </Link>
@@ -60,7 +60,7 @@ export function RecentSessions() {
         {mockNegotiations.map((negotiation, index) => {
           const clipClass = index % 2 === 0 ? "clip-card-a" : "clip-card-b";
           return (
-            <div key={negotiation.id} className={`bg-[#7fb069] p-[3px] ${clipClass}`}>
+            <div key={negotiation.id} className={`bg-olive p-[3px] ${clipClass}`}>
               <div className={`overflow-hidden bg-white ${clipClass}`}>
                 <div className="relative">
                   <img
@@ -69,17 +69,17 @@ export function RecentSessions() {
                     className="h-48 w-full object-cover"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-black/10 to-transparent" />
-                  <div className="absolute bottom-4 left-4 flex items-center gap-2 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-[#1a1a1a]">
+                  <div className="absolute bottom-4 left-4 flex items-center gap-2 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-ink">
                     <Play size={12} />
                     Replay
                   </div>
                 </div>
                 <div className="space-y-3 p-6">
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#7fb069]">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-olive">
                     {negotiation.scenario}
                   </div>
-                  <div className="text-xl font-serif text-[#1a1a1a]">{negotiation.title}</div>
-                  <div className="flex flex-wrap items-center gap-3 text-xs font-medium text-[#666]">
+                  <div className="text-xl font-serif text-ink">{negotiation.title}</div>
+                  <div className="flex flex-wrap items-center gap-3 text-xs font-medium text-muted">
                     <span>{negotiation.date}</span>
                     <span>•</span>
                     <span>{negotiation.duration}</span>
@@ -88,7 +88,7 @@ export function RecentSessions() {
                   </div>
                   <Link
                     href={`/postmortem/${negotiation.id}`}
-                    className="inline-flex items-center text-sm font-semibold text-[#1a1a1a]"
+                    className="inline-flex items-center text-sm font-semibold text-ink"
                   >
                     View post-mortem
                   </Link>

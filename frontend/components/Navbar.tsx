@@ -42,7 +42,7 @@ export function Navbar({ currentPage }: NavbarProps) {
         </div>
         <div className="flex items-center gap-3">
           <Link
-            href="/negotiation"
+            href="/practice"
             className="flex items-center gap-2 rounded-full bg-ink px-6 py-3 text-sm font-bold text-white shadow-md transition hover:-translate-y-0.5 hover:shadow-lg"
           >
             <Play size={14} />

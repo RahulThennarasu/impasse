@@ -2,21 +2,39 @@ import os
 from typing import List, Dict, Optional
 from groq import Groq
 
+
 class CoachAgent:
     """
-    Enhanced coach agent that understands full scenario context.
-    Gives strategic advice based on information asymmetries, power dynamics, and tactics.
+    Real-time negotiation coach that analyzes exchanges and provides tactical advice.
+
+    The coach watches the negotiation and provides tips when it spots:
+    - Tactics being used by the opponent
+    - Opportunities the user could exploit
+    - Mistakes the user is making
+    - Strategic moments to act
+
+    Usage:
+        coach = CoachAgent(coach_config)
+
+        # After each exchange
+        tip = coach.analyze_turn(session.get_transcript())
+        if tip:
+            # Display tip to user (audio or text)
+
+        # At end of negotiation
+        final_feedback = coach.get_final_advice(session.get_transcript())
     """
 
     def __init__(self, scenario_data: Dict):
         """
-        scenario_data should contain:
-        - user_objectives: What you're trying to achieve
-        - user_batna: Your walkaway alternative
-        - points_of_tension: Known conflicts
-        - negotiable_items: What's on the table
-        - success_criteria: What defines a good outcome
-        - info_asymmetries: What you know vs. what they know
+        Args:
+            scenario_data: Configuration dict containing:
+                - user_objectives: What you're trying to achieve
+                - user_batna: Your walkaway alternative
+                - points_of_tension: Known conflicts
+                - negotiable_items: What's on the table
+                - success_criteria: What defines a good outcome
+                - info_asymmetries: What you know vs. what they know
         """
         self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         self.model = os.getenv("GROQ_COACH_MODEL", "llama-3.3-70b-versatile")
@@ -94,28 +112,41 @@ YOUR COACHING ROLE:
 IMPORTANT RULES:
 - Only speak when you spot something VALUABLE (don't spam advice every turn)
 - Keep tips SHORT and ACTIONABLE (1-2 sentences max)
-- Format: "💡 [Tactic/Opportunity]: [What to do]"
+- Format: "[Tactic/Opportunity]: [What to do]"
 - If nothing important happened, respond with exactly: "PASS"
 
 EXAMPLES:
-- "💡 Anchoring detected: They opened at $80k to set a low range. Counter with data on market rates, don't split the difference."
-- "💡 Bluff spotted: They claimed budget constraints but just offered more. Test their real ceiling."
-- "💡 Opening: They asked about your timeline twice. That's their pressure point - they need speed."
-- "💡 Mistake: You revealed your deadline. Now they know you're under time pressure."
-- "💡 Leverage moment: Mention your alternative offer NOW while they're making concessions."
+- "Anchoring detected: They opened at $80k to set a low range. Counter with data on market rates, don't split the difference."
+- "Bluff spotted: They claimed budget constraints but just offered more. Test their real ceiling."
+- "Opening: They asked about your timeline twice. That's their pressure point - they need speed."
+- "Mistake: You revealed your deadline. Now they know you're under time pressure."
+- "Leverage moment: Mention your alternative offer NOW while they're making concessions."
 
 Remember: You're helping them LEARN, not doing the negotiation for them."""
 
     def analyze_turn(self, transcript: List[Dict]) -> Optional[str]:
         """
-        Analyzes recent turns and returns coaching tip if something important happened
+        Analyzes recent turns and returns coaching tip if something important happened.
+
+        Args:
+            transcript: List of messages from NegotiationSession.get_transcript()
+                Each message has: role, content, timestamp, turn
+
+        Returns:
+            Coaching tip string, or None if nothing significant happened
         """
-        # Only analyze if there are new turns
+        # Only analyze if there are new messages
         if len(transcript) <= self.last_analyzed_turn:
             return None
 
         # Get last 4 messages (2 exchanges) for context
         recent_messages = transcript[-4:] if len(transcript) >= 4 else transcript
+
+        # Build analysis prompt
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": f"Analyze this exchange:\n\n{self._format_transcript(recent_messages)}"}
+        ]
 
         response = self.client.chat.completions.create(
             model=self.model,
@@ -129,26 +160,24 @@ Remember: You're helping them LEARN, not doing the negotiation for them."""
 
         tip = (response.choices[0].message.content or "").strip()
 
-        # Update last analyzed turn
+        # Update last analyzed position
         self.last_analyzed_turn = len(transcript)
 
         # Return None if coach passes
-        if tip == "PASS":
+        if tip.upper() == "PASS":
             return None
 
         return tip
 
-    def _format_transcript(self, messages: List[Dict]) -> str:
-        """Formats messages for analysis"""
-        formatted = []
-        for msg in messages:
-            role = "User" if msg["role"] == "user" else "Opponent"
-            formatted.append(f"{role}: {msg['content']}")
-        return "\n".join(formatted)
-
     def get_final_advice(self, transcript: List[Dict]) -> str:
         """
-        Provides comprehensive performance review at the end
+        Provides comprehensive performance review at the end of negotiation.
+
+        Args:
+            transcript: Full transcript from NegotiationSession.get_transcript()
+
+        Returns:
+            Final feedback and advice string
         """
         prompt = f"""You are a negotiation coach providing final performance feedback.
 
@@ -179,4 +208,29 @@ Here's the full negotiation:
             max_tokens=self.max_final_tokens,
         )
 
-        return response.choices[0].message.content or ""
+        return response.choices[0].message.content
+
+    def reset(self) -> None:
+        """Reset the coach for a new negotiation."""
+        self.last_analyzed_turn = 0
+
+    def _format_transcript(self, messages: List[Dict]) -> str:
+        """
+        Formats messages for LLM analysis.
+
+        Handles both simple format (role, content) and full format
+        (role, content, timestamp, turn) from NegotiationSession.
+        """
+        formatted = []
+        for msg in messages:
+            role = "User" if msg["role"] == "user" else "Opponent"
+            content = msg.get("content", "")
+
+            # Include turn number if available
+            turn = msg.get("turn")
+            if turn is not None:
+                formatted.append(f"[Turn {turn}] {role}: {content}")
+            else:
+                formatted.append(f"{role}: {content}")
+
+        return "\n".join(formatted)

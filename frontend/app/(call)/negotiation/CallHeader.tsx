@@ -36,7 +36,7 @@ export function CallHeader({
             checked={isThinking}
             onChange={onThinkingChange}
             className={`relative flex h-6 w-11 items-center rounded-full border transition cursor-pointer ${
-              isThinking ? "border-[#7fb069] bg-[#7fb069]" : "border-white/20 bg-white/10"
+              isThinking ? "border-olive bg-olive" : "border-white/20 bg-white/10"
             }`}
           >
             <span className="sr-only">Toggle thinking state</span>
@@ -53,7 +53,7 @@ export function CallHeader({
             checked={testAudioOn}
             onChange={onTestAudioChange}
             className={`relative flex h-6 w-11 items-center rounded-full border transition cursor-pointer ${
-              testAudioOn ? "border-[#7fb069] bg-[#7fb069]" : "border-white/20 bg-white/10"
+              testAudioOn ? "border-olive bg-olive" : "border-white/20 bg-white/10"
             }`}
           >
             <span className="sr-only">Toggle test audio</span>

@@ -4,7 +4,7 @@ import { LibraryHero } from "./LibraryHero";
 
 export default function LibraryPage() {
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#e8f5e1] to-[#f5faf3]">
+    <div className="min-h-screen bg-hero-gradient">
       <Navbar currentPage="library" />
       <LibraryHero />
       <LibraryClient />

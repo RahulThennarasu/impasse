@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@headlessui/react";
 import { Maximize2 } from "lucide-react";
 import { CallControls } from "./CallControls";
@@ -46,6 +47,7 @@ const keyPoints = [
 ];
 
 export function NegotiationClient() {
+  const router = useRouter();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -286,6 +288,7 @@ export function NegotiationClient() {
           onMutedChange={setIsMuted}
           isVideoOff={isVideoOff}
           onVideoChange={setIsVideoOff}
+          onEndSession={() => router.push("/postmortem/current-session")}
         />
       </main>
     </div>

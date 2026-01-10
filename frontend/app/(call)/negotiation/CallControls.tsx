@@ -8,6 +8,7 @@ type CallControlsProps = {
   onMutedChange: (value: boolean) => void;
   isVideoOff: boolean;
   onVideoChange: (value: boolean) => void;
+  onEndSession: () => void;
 };
 
 export function CallControls({
@@ -15,6 +16,7 @@ export function CallControls({
   onMutedChange,
   isVideoOff,
   onVideoChange,
+  onEndSession,
 }: CallControlsProps) {
   return (
     <div className="absolute bottom-0 left-0 right-0 flex justify-center bg-gradient-to-t from-black/80 via-black/40 to-transparent px-6 py-8">
@@ -55,6 +57,7 @@ export function CallControls({
         </Button>
         <Button
           type="button"
+          onClick={onEndSession}
           className="flex h-14 w-14 items-center justify-center rounded-full bg-danger text-white shadow-danger-glow transition hover-bg-danger-dark cursor-pointer"
         >
           <PhoneOff size={22} />

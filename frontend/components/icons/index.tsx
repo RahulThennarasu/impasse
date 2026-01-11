@@ -8,8 +8,8 @@ type IconProps = ComponentProps<"svg"> & {
 const baseProps = {
   fill: "none",
   stroke: "currentColor",
-  strokeLinecap: "round",
-  strokeLinejoin: "round",
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
 };
 
 export function Play({ size = 20, strokeWidth = 2, ...props }: IconProps) {

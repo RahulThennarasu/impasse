@@ -38,7 +38,7 @@ const base64ToArrayBuffer = (base64: string) => {
   return bytes.buffer;
 };
 
-const pcm16ToFloat32 = (buffer: ArrayBuffer): Float32Array => {
+const pcm16ToFloat32 = (buffer: ArrayBuffer): Float32Array<ArrayBuffer> => {
   const int16 = new Int16Array(buffer);
   const float32 = new Float32Array(int16.length);
   for (let i = 0; i < int16.length; i += 1) {
@@ -129,6 +129,19 @@ export function NegotiationClient() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
 
+  // Canvas recording refs for compositing user video + opponent orb
+  const recordingCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const recordingCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const canvasAnimationRef = useRef<number | null>(null);
+  const recordingAudioContextRef = useRef<AudioContext | null>(null);
+  const recordingAudioDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+
+  // Opponent orb state for canvas rendering
+  const orbAudioLevelRef = useRef(0);
+  const orbMotionPhaseRef = useRef(0);
+  const orbIsThinkingRef = useRef(false);
+
   // Multipart upload refs for streaming
   const uploadIdRef = useRef<string | null>(null);
   const uploadedPartsRef = useRef<CompletedPart[]>([]);
@@ -169,6 +182,15 @@ export function NegotiationClient() {
       ? "Speaking"
       : "Idle";
 
+  // Sync orb state to refs for canvas recording
+  useEffect(() => {
+    orbAudioLevelRef.current = agentActivity;
+  }, [agentActivity]);
+
+  useEffect(() => {
+    orbIsThinkingRef.current = isThinking;
+  }, [isThinking]);
+
   useEffect(() => {
     let active = true;
 
@@ -188,11 +210,219 @@ export function NegotiationClient() {
         }
 
         // Start recording with streaming upload to S3
+        // Use canvas compositing to capture both user video and opponent orb
+        // Mix user mic audio with TTS audio for complete recording
         try {
           const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
             ? "video/webm;codecs=vp9,opus"
             : "video/webm";
-          const mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
+
+          // Create canvas for compositing video
+          const canvas = document.createElement("canvas");
+          canvas.width = 1280;
+          canvas.height = 720;
+          const ctx = canvas.getContext("2d");
+          recordingCanvasRef.current = canvas;
+          recordingCtxRef.current = ctx;
+
+          // Create audio context for mixing mic + TTS
+          const recordingAudioCtx = new AudioContext({ sampleRate: 44100 });
+          const audioDest = recordingAudioCtx.createMediaStreamDestination();
+          recordingAudioContextRef.current = recordingAudioCtx;
+          recordingAudioDestRef.current = audioDest;
+
+          // Connect user microphone to recording destination
+          const micSource = recordingAudioCtx.createMediaStreamSource(mediaStream);
+          micSource.connect(audioDest);
+          micSourceRef.current = micSource;
+
+          // Function to draw the opponent orb on canvas
+          const drawOpponentOrb = (
+            context: CanvasRenderingContext2D,
+            audioLevel: number,
+            motionPhase: number,
+            isThinking: boolean
+          ) => {
+            const orbX = 40;
+            const orbY = 40;
+            const orbRadius = 56;
+
+            // Draw orb background
+            context.save();
+            context.beginPath();
+            context.arc(orbX + orbRadius, orbY + orbRadius, orbRadius, 0, Math.PI * 2);
+            context.fillStyle = "rgba(0, 0, 0, 0.9)";
+            context.fill();
+
+            // Draw glow effect based on audio level
+            const glowScale = 0.75 + audioLevel * 0.5;
+            context.beginPath();
+            context.arc(orbX + orbRadius, orbY + orbRadius, orbRadius * glowScale, 0, Math.PI * 2);
+            context.fillStyle = `rgba(163, 190, 140, ${0.2 + audioLevel * 0.3})`;
+            context.filter = "blur(16px)";
+            context.fill();
+            context.filter = "none";
+
+            // Draw thinking ring if thinking
+            if (isThinking) {
+              context.beginPath();
+              context.arc(orbX + orbRadius, orbY + orbRadius, orbRadius - 8, 0, Math.PI * 2);
+              context.strokeStyle = `rgba(163, 190, 140, ${0.4 + Math.sin(motionPhase * 5) * 0.2})`;
+              context.lineWidth = 1;
+              context.stroke();
+            }
+
+            // Draw particles
+            const seededRandom = (seed: number) => {
+              let t = seed;
+              return () => {
+                t += 0x6d2b79f5;
+                let m = Math.imul(t ^ (t >>> 15), 1 | t);
+                m ^= m + Math.imul(m ^ (m >>> 7), 61 | m);
+                return ((m ^ (m >>> 14)) >>> 0) / 4294967296;
+              };
+            };
+
+            for (let i = 0; i < 48; i++) {
+              const rng = seededRandom(i + 1);
+              const angle = rng() * Math.PI * 2;
+              const radius = Math.sqrt(rng()) * 32;
+              const baseX = Math.cos(angle) * radius;
+              const baseY = Math.sin(angle) * radius;
+              const dx = rng() * 2 - 1;
+              const dy = rng() * 2 - 1;
+              const f1 = 0.6 + rng() * 0.9;
+              const f2 = 0.7 + rng() * 1.1;
+              const p1 = rng() * Math.PI * 2;
+              const size = 3 + (i % 3) * 2;
+
+              const phase = motionPhase + p1 * 0.4;
+              const speedBoost = 1 + audioLevel * 1.8;
+              const flowX = Math.cos(phase * f1) * 2.2 * speedBoost;
+              const flowY = Math.sin(phase * f2) * 2.2 * speedBoost;
+              const swirlX = Math.sin(phase + p1) * dx * 1.8 * speedBoost;
+              const swirlY = Math.cos(phase + p1) * dy * 1.8 * speedBoost;
+              const expansion = 0.7 + audioLevel * 0.55;
+              const sizeBoost = 1 + audioLevel * 0.9;
+              const x = (baseX + flowX + swirlX * 0.45) * expansion;
+              const y = (baseY + flowY + swirlY * 0.45) * expansion;
+              const opacity = 0.4 + audioLevel * 0.6;
+
+              context.beginPath();
+              context.arc(
+                orbX + orbRadius + x,
+                orbY + orbRadius + y,
+                (size * sizeBoost) / 2,
+                0,
+                Math.PI * 2
+              );
+              context.fillStyle = `rgba(163, 190, 140, ${opacity})`;
+              context.fill();
+            }
+
+            context.restore();
+
+            // Draw status label
+            context.save();
+            context.fillStyle = "rgba(0, 0, 0, 0.4)";
+            context.strokeStyle = "rgba(255, 255, 255, 0.2)";
+            context.lineWidth = 1;
+            const labelX = orbX;
+            const labelY = orbY + orbRadius * 2 + 12;
+            const labelWidth = 160;
+            const labelHeight = 28;
+            context.beginPath();
+            context.roundRect(labelX, labelY, labelWidth, labelHeight, 14);
+            context.fill();
+            context.stroke();
+
+            context.font = "12px system-ui, sans-serif";
+            context.fillStyle = "white";
+            context.textAlign = "left";
+            context.textBaseline = "middle";
+            const statusText = isThinking ? "Thinking" : audioLevel > 0.1 ? "Speaking" : "Idle";
+            context.fillText(`Opponent status: ${statusText}`, labelX + 12, labelY + labelHeight / 2);
+            context.restore();
+          };
+
+          // Animation loop to draw composited frame
+          let lastFrameTime = 0;
+          const targetFps = 30;
+          const frameInterval = 1000 / targetFps;
+
+          const drawFrame = (timestamp: number) => {
+            if (!recordingCanvasRef.current || !recordingCtxRef.current || !videoRef.current) {
+              canvasAnimationRef.current = requestAnimationFrame(drawFrame);
+              return;
+            }
+
+            // Throttle to target FPS
+            if (timestamp - lastFrameTime < frameInterval) {
+              canvasAnimationRef.current = requestAnimationFrame(drawFrame);
+              return;
+            }
+            lastFrameTime = timestamp;
+
+            const context = recordingCtxRef.current;
+            const video = videoRef.current;
+
+            // Update motion phase
+            orbMotionPhaseRef.current += 0.016 * (0.001 + orbAudioLevelRef.current * 0.002) * 60;
+
+            // Clear and draw video (mirrored)
+            context.save();
+            context.translate(canvas.width, 0);
+            context.scale(-1, 1);
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            context.restore();
+
+            // Draw opponent orb overlay
+            drawOpponentOrb(
+              context,
+              orbAudioLevelRef.current,
+              orbMotionPhaseRef.current,
+              orbIsThinkingRef.current
+            );
+
+            // Draw LIVE indicator
+            context.save();
+            context.fillStyle = "rgba(0, 0, 0, 0.4)";
+            context.strokeStyle = "rgba(255, 255, 255, 0.1)";
+            context.lineWidth = 1;
+            context.beginPath();
+            context.roundRect(canvas.width - 80, 24, 56, 28, 14);
+            context.fill();
+            context.stroke();
+
+            // Green dot
+            context.beginPath();
+            context.arc(canvas.width - 64, 38, 4, 0, Math.PI * 2);
+            context.fillStyle = "#a3be8c";
+            context.shadowColor = "#a3be8c";
+            context.shadowBlur = 8;
+            context.fill();
+            context.shadowBlur = 0;
+
+            // LIVE text
+            context.font = "bold 11px system-ui, sans-serif";
+            context.fillStyle = "white";
+            context.textAlign = "left";
+            context.fillText("LIVE", canvas.width - 54, 42);
+            context.restore();
+
+            canvasAnimationRef.current = requestAnimationFrame(drawFrame);
+          };
+
+          canvasAnimationRef.current = requestAnimationFrame(drawFrame);
+
+          // Get canvas stream and combine with mixed audio
+          const canvasStream = canvas.captureStream(30);
+          const combinedStream = new MediaStream([
+            ...canvasStream.getVideoTracks(),
+            ...audioDest.stream.getAudioTracks(),
+          ]);
+
+          const mediaRecorder = new MediaRecorder(combinedStream, { mimeType });
           mediaRecorderRef.current = mediaRecorder;
           recordedChunksRef.current = [];
           pendingChunksRef.current = [];
@@ -311,9 +541,26 @@ export function NegotiationClient() {
 
     return () => {
       active = false;
+      // Stop canvas animation
+      if (canvasAnimationRef.current) {
+        cancelAnimationFrame(canvasAnimationRef.current);
+        canvasAnimationRef.current = null;
+      }
+      // Stop media recorder
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
         mediaRecorderRef.current.stop();
       }
+      // Close recording audio context
+      if (recordingAudioContextRef.current) {
+        recordingAudioContextRef.current.close();
+        recordingAudioContextRef.current = null;
+      }
+      // Clear canvas refs
+      recordingCanvasRef.current = null;
+      recordingCtxRef.current = null;
+      recordingAudioDestRef.current = null;
+      micSourceRef.current = null;
+      // Stop media stream tracks
       setStream((current) => {
         current?.getTracks().forEach((track) => track.stop());
         return null;
@@ -698,7 +945,25 @@ export function NegotiationClient() {
           audioBuffer.copyToChannel(pcm, 0);
           const source = context.createBufferSource();
           source.buffer = audioBuffer;
+          // Connect to speaker output for playback
           source.connect(context.destination);
+          // Also connect to recording destination to capture TTS audio
+          if (recordingAudioDestRef.current && recordingAudioContextRef.current) {
+            // Create a media stream source from the TTS context and route to recording
+            // We need to copy the audio to the recording context
+            const recordingCtx = recordingAudioContextRef.current;
+            const recordingBuffer = recordingCtx.createBuffer(1, pcm.length, 44100);
+            recordingBuffer.copyToChannel(pcm, 0);
+            const recordingSource = recordingCtx.createBufferSource();
+            recordingSource.buffer = recordingBuffer;
+            recordingSource.connect(recordingAudioDestRef.current);
+            // Schedule at same relative time
+            const recordingStartTime = Math.max(
+              recordingCtx.currentTime,
+              recordingCtx.currentTime + (Math.max(context.currentTime, ttsQueueEndRef.current) - context.currentTime)
+            );
+            recordingSource.start(recordingStartTime);
+          }
           const startTime = Math.max(
             context.currentTime,
             ttsQueueEndRef.current

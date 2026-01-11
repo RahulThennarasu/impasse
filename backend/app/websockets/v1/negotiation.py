@@ -9,6 +9,7 @@ Flow:
 5. Stream audio back to user
 """
 
+import uuid
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 import logging
 import json
@@ -17,7 +18,7 @@ import os
 import base64
 import sys
 import httpx
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 # Add agents to path
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../../.."))
@@ -26,8 +27,7 @@ from pydantic import BaseModel
 from supabase import create_client, Client
 from app.core.config import settings
 from agents.scenario_agent.scenario import generate_scenario
-from deepgram import DeepgramClient, DeepgramClientOptions, LiveOptions
-from deepgram.clients.live.v1 import LiveTranscriptionEvents
+from deepgram import DeepgramClient, DeepgramClientOptions, LiveOptions, LiveTranscriptionEvents
 try:
     from cartesia import Cartesia
 except ImportError:

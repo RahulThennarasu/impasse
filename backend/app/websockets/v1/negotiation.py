@@ -95,6 +95,7 @@ class NegotiationSession:
         self.received_audio = False
         self.pending_transcript = ""
         self.flush_task = None
+        self.is_tts_cancelled = False
         self.transcript_pause_seconds = float(os.getenv("TRANSCRIPT_PAUSE_SECONDS", "3"))
         self.user_turns = 0
         self.coach_every_n_turns = int(os.getenv("COACH_EVERY_N_TURNS", "3"))
@@ -269,6 +270,9 @@ class NegotiationSession:
                 logger.warning(f"Session {self.session_id}: TTS disabled - skipping audio generation")
                 return
 
+            # Reset cancellation flag at the start of new TTS
+            self.is_tts_cancelled = False
+
             # Notify frontend that audio is coming
             await self.websocket.send_json({
                 "type": "audio_start"
@@ -292,6 +296,11 @@ class NegotiationSession:
                 voice_id=voice_id,
                 output_format=output_format,
             ):
+                # Check if barge-in occurred
+                if self.is_tts_cancelled:
+                    logger.info(f"Session {self.session_id}: TTS cancelled due to barge-in")
+                    break
+
                 audio_bytes = chunk.get("audio") if isinstance(chunk, dict) else chunk
                 if audio_bytes:
                     audio_base64 = base64.b64encode(audio_bytes).decode()
@@ -302,12 +311,15 @@ class NegotiationSession:
                         "encoding": "pcm_s16le"
                     })
 
-            # Notify frontend that audio is complete
+            # Notify frontend that audio is complete (even if cancelled)
             await self.websocket.send_json({
                 "type": "audio_end"
             })
 
-            logger.info(f"Session {self.session_id}: TTS audio stream completed")
+            if self.is_tts_cancelled:
+                logger.info(f"Session {self.session_id}: TTS stream cancelled by barge-in")
+            else:
+                logger.info(f"Session {self.session_id}: TTS audio stream completed")
 
         except Exception as e:
             logger.error(f"Session {self.session_id}: TTS error: {e}", exc_info=True)
@@ -368,6 +380,15 @@ class NegotiationSession:
 
         except Exception as e:
             logger.error(f"Session {self.session_id}: Error getting opening: {e}")
+
+    def handle_barge_in(self):
+        """Handle user interruption - cancel TTS and prepare for new input"""
+        logger.info(f"Session {self.session_id}: Barge-in detected - cancelling TTS")
+        self.is_tts_cancelled = True
+        # Clear any pending transcript flush since user is speaking new content
+        if self.flush_task and not self.flush_task.done():
+            self.flush_task.cancel()
+        self.pending_transcript = ""
 
     async def cleanup(self):
         """Clean up session resources"""
@@ -469,6 +490,10 @@ async def websocket_negotiation(websocket: WebSocket, session_id: str):
                         "type": "transcript",
                         "transcript": session.opponent.transcript
                     })
+
+                elif msg_type == "barge_in":
+                    # User started speaking while TTS was playing
+                    session.handle_barge_in()
 
     except WebSocketDisconnect:
         logger.info(f"Session {session_id}: Client disconnected")

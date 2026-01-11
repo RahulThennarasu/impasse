@@ -1,18 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { Button } from "@headlessui/react";
+import { useRouter } from "next/navigation";
+import { Button, Dialog, DialogPanel, DialogTitle } from "@headlessui/react";
 import { Maximize2 } from "lucide-react";
 import { CallControls } from "./CallControls";
 import { CallHeader } from "./CallHeader";
 import { OpponentOrb } from "./OpponentOrb";
+import { useNegotiation } from "./NegotiationContext";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import {
   getWsBaseUrl,
   requestPostMortem,
   type CoachTip,
-  type ScenarioContext,
 } from "@/lib/api";
 
 const initialCoachSuggestions: CoachTip[] = [
@@ -100,8 +100,20 @@ const floatTo16BitPCM = (input: Float32Array) => {
 
 export function NegotiationClient() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const sessionId = searchParams.get("sessionId") ?? "";
+  const {
+    sessionId,
+    scenario,
+    notes,
+    phase,
+    notesRemaining,
+    callRemaining,
+    setNotes,
+    startCall,
+    markCallStarted,
+    endCall,
+    callStartedAt,
+    setNotesRemaining,
+  } = useNegotiation();
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -115,12 +127,11 @@ export function NegotiationClient() {
   const inputGainRef = useRef<GainNode | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const rafRef = useRef<number | null>(null);
+  const autoEndRef = useRef(false);
 
-  const [notes, setNotes] = useState("");
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [sessionTime] = useState(754);
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [testAudioOn, setTestAudioOn] = useState(false);
@@ -135,7 +146,6 @@ export function NegotiationClient() {
   const [coachSuggestions, setCoachSuggestions] = useState<CoachTip[]>(
     initialCoachSuggestions
   );
-  const [scenario, setScenario] = useState<ScenarioContext | null>(null);
 
   const activeLevel = testAudioOn ? audioLevel : agentActivity;
   const isThinking = agentStatus === "thinking" || debugThinking;
@@ -147,18 +157,6 @@ export function NegotiationClient() {
       : agentStatus === "speaking"
       ? "Speaking"
       : "Idle";
-
-  useEffect(() => {
-    if (!sessionId) return;
-    const stored = sessionStorage.getItem(`scenario:${sessionId}`);
-    if (stored) {
-      try {
-        setScenario(JSON.parse(stored));
-      } catch {
-        setScenario(null);
-      }
-    }
-  }, [sessionId]);
 
   useEffect(() => {
     let active = true;
@@ -182,7 +180,9 @@ export function NegotiationClient() {
       }
     };
 
-    startCapture();
+    if (phase === "call") {
+      startCapture();
+    }
 
     return () => {
       active = false;
@@ -191,7 +191,7 @@ export function NegotiationClient() {
         return null;
       });
     };
-  }, []);
+  }, [phase]);
 
   useEffect(() => {
     if (!stream) return;
@@ -268,6 +268,12 @@ export function NegotiationClient() {
   }, [testAudioOn, startTestAudio, stopTestAudio]);
 
   useEffect(() => {
+    if (phase !== "call" && testAudioOn) {
+      setTestAudioOn(false);
+    }
+  }, [phase, testAudioOn]);
+
+  useEffect(() => {
     return () => {
       stopTestAudio();
       if (ttsEndTimerRef.current) {
@@ -302,10 +308,11 @@ export function NegotiationClient() {
   }, [testAudioOn]);
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || phase !== "call") return;
     const wsUrl = `${getWsBaseUrl()}/api/v1/ws/negotiation/${sessionId}`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
+    setSocketReady(false);
 
     ws.onopen = () => {
       const scenarioPayload =
@@ -329,7 +336,6 @@ export function NegotiationClient() {
       ws.send(
         JSON.stringify({ type: "initialize", scenario: scenarioPayload })
       );
-      setSocketReady(true);
     };
 
     ws.onmessage = (event) => {
@@ -337,6 +343,7 @@ export function NegotiationClient() {
         const data = JSON.parse(event.data);
         if (data.type === "ready") {
           setAgentStatus("idle");
+          setSocketReady(true);
         }
         if (data.type === "error") {
           setMediaError(data.message ?? "Server error");
@@ -445,10 +452,10 @@ export function NegotiationClient() {
       wsRef.current = null;
       setSocketReady(false);
     };
-  }, [sessionId, scenario]);
+  }, [sessionId, scenario, phase]);
 
   useEffect(() => {
-    if (!stream || !wsRef.current || !socketReady) return;
+    if (!stream || !wsRef.current || !socketReady || phase !== "call") return;
     const ws = wsRef.current;
     if (ws.readyState !== WebSocket.OPEN) return;
     const context = new AudioContext({ sampleRate: 16000 });
@@ -481,12 +488,14 @@ export function NegotiationClient() {
       context.close();
       inputContextRef.current = null;
     };
-  }, [stream, isMuted, socketReady]);
+  }, [stream, isMuted, socketReady, phase]);
 
   const handleEndSession = async () => {
+    autoEndRef.current = true;
     if (wsRef.current) {
       wsRef.current.send(JSON.stringify({ type: "end_negotiation" }));
     }
+    endCall();
     if (sessionId) {
       try {
         await requestPostMortem(sessionId);
@@ -507,6 +516,111 @@ export function NegotiationClient() {
   const headerSubtitle = scenario
     ? `Role: ${scenario.role} • ${scenario.description}`
     : "Opponent: AI Agent • Scenario loading";
+
+  useEffect(() => {
+    if (phase === "call" && socketReady && !callStartedAt) {
+      markCallStarted();
+    }
+  }, [phase, socketReady, callStartedAt, markCallStarted]);
+
+  useEffect(() => {
+    if (phase === "ended" && !autoEndRef.current) {
+      autoEndRef.current = true;
+      handleEndSession();
+    }
+  }, [phase]);
+
+  if (phase !== "call") {
+    return (
+      <div className="relative min-h-screen bg-night text-white">
+        <div className="mx-auto flex max-w-5xl flex-col gap-6 px-8 pb-20 pt-12">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.28em] text-olive-soft">
+                Note-taking phase
+              </div>
+              <h1 className="mt-3 text-3xl font-serif text-white">
+                {headerTitle}
+              </h1>
+              <p className="mt-2 max-w-2xl text-sm text-white/70">
+                {headerSubtitle}
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="rounded-full border border-white/10 bg-black/60 px-5 py-3 text-sm font-semibold text-white">
+                {formatTime(notesRemaining)}
+              </div>
+              <Button
+                type="button"
+                onClick={() => setNotesRemaining(5)}
+                className="rounded-full border border-white/10 bg-black/50 px-4 py-2 text-xs font-semibold text-white/80 transition hover:bg-black/70 cursor-pointer"
+              >
+                Debug: set 5s left
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className="rounded-2xl border border-white/10 bg-black/40 p-6">
+              <h2 className="text-lg font-semibold text-white">Your notes</h2>
+              <p className="mt-2 text-sm text-white/60">
+                Capture anchors, concessions, and must-haves before the call starts.
+              </p>
+              <textarea
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                placeholder="Outline your goals, walkaway points, and key questions..."
+                className="mt-4 h-72 w-full resize-none rounded-xl border border-white/10 bg-black/50 p-4 text-sm text-white outline-none focus-border-olive"
+              />
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-black/40 p-6">
+              <h2 className="text-lg font-semibold text-white">Scenario brief</h2>
+              <p className="mt-2 text-sm text-white/60">
+                {scenario?.description ?? "Scenario details will appear once generated."}
+              </p>
+              <div className="mt-6 rounded-xl border border-white/10 bg-black/60 p-4 text-sm text-white/70">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-olive-soft">
+                  Your role
+                </div>
+                <div className="mt-2 text-base text-white">
+                  {scenario?.role ?? "Negotiator"}
+                </div>
+              </div>
+              <div className="mt-4 rounded-xl border border-white/10 bg-black/60 p-4 text-sm text-white/70">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-olive-soft">
+                  Timer
+                </div>
+                <div className="mt-2 text-base text-white">
+                  {formatTime(notesRemaining)} remaining
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <Dialog open={phase === "ready"} onClose={() => null} className="relative z-50">
+          <div className="fixed inset-0 bg-black/70" aria-hidden="true" />
+          <div className="fixed inset-0 flex items-center justify-center p-6">
+            <DialogPanel className="w-full max-w-md rounded-2xl border border-white/10 bg-black/90 p-8 text-white shadow-2xl">
+              <DialogTitle className="text-xl font-semibold text-white">
+                Notes time complete
+              </DialogTitle>
+              <p className="mt-3 text-sm text-white/70">
+                Your 15 minutes are up. Start the negotiation when you're ready.
+              </p>
+              <Button
+                type="button"
+                onClick={startCall}
+                className="mt-6 w-full rounded-full bg-olive px-6 py-3 text-sm font-semibold text-white shadow-md transition hover:-translate-y-0.5 hover:shadow-lg cursor-pointer"
+              >
+                Start negotiation
+              </Button>
+            </DialogPanel>
+          </div>
+        </Dialog>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-night text-white">
@@ -532,7 +646,7 @@ export function NegotiationClient() {
         )}
 
         <CallHeader
-          timeLabel={formatTime(sessionTime)}
+          timeLabel={formatTime(callRemaining)}
           title={headerTitle}
           subtitle={headerSubtitle}
           testAudioOn={testAudioOn}
@@ -564,7 +678,16 @@ export function NegotiationClient() {
             LIVE
           </div>
           <div className="absolute right-8 top-6 rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs font-semibold text-white backdrop-blur">
-            {formatTime(sessionTime)}
+            {formatTime(callRemaining)}
+          </div>
+          <div className="absolute right-8 top-16 rounded-full border border-white/10 bg-black/40 px-3 py-2 text-[10px] font-semibold text-white/70 backdrop-blur">
+            <Button
+              type="button"
+              onClick={handleEndSession}
+              className="cursor-pointer"
+            >
+              Debug: end session
+            </Button>
           </div>
 
           <OpponentOrb

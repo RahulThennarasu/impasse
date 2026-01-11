@@ -16,9 +16,11 @@ import {
   getPartUploadUrl,
   uploadPart,
   completeMultipartUpload,
+  updatePostMortemVideoUrl,
   type CoachTip,
   type CompletedPart,
 } from "@/lib/api";
+import { VisibilityDialog } from "./VisibilityDialog";
 
 const initialCoachSuggestions: CoachTip[] = [];
 
@@ -119,7 +121,6 @@ export function NegotiationClient() {
   const rafRef = useRef<number | null>(null);
   const autoEndRef = useRef(false);
   const negotiationCompleteRef = useRef(false);
-  const negotiationCompleteResolveRef = useRef<((value: boolean) => void) | null>(null);
   const ttsSourcesRef = useRef<AudioBufferSourceNode[]>([]);
   const isTtsPlayingRef = useRef(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -150,6 +151,9 @@ export function NegotiationClient() {
   const [coachSuggestions, setCoachSuggestions] = useState<CoachTip[]>(
     initialCoachSuggestions
   );
+  const [showVisibilityDialog, setShowVisibilityDialog] = useState(false);
+  const [isProcessingPostMortem, setIsProcessingPostMortem] = useState(false);
+  const [processingStatus, setProcessingStatus] = useState("");
 
   const activeLevel = testAudioOn ? audioLevel : agentActivity;
   const isThinking = agentStatus === "thinking" || debugThinking;
@@ -285,20 +289,8 @@ export function NegotiationClient() {
                 console.error("Failed to upload final part:", err);
               }
             }
-
-            // Complete the multipart upload (instant - just metadata)
-            try {
-              console.log("Completing multipart upload...");
-              await completeMultipartUpload(
-                currentSessionId,
-                uploadIdRef.current,
-                uploadedPartsRef.current,
-                false
-              );
-              console.log("Video upload completed successfully!");
-            } catch (err) {
-              console.error("Failed to complete multipart upload:", err);
-            }
+            // Don't complete the upload here - wait for visibility selection
+            console.log("Final part uploaded, waiting for visibility selection...");
           };
 
           mediaRecorder.start(1000); // Collect data every second
@@ -326,31 +318,6 @@ export function NegotiationClient() {
     };
   }, [phase]);
 
-  const waitForNegotiationComplete = useCallback((timeoutMs: number = 6000) => {
-    if (negotiationCompleteRef.current) {
-      return Promise.resolve(true);
-    }
-
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      return Promise.resolve(false);
-    }
-
-    return new Promise<boolean>((resolve) => {
-      const timer = window.setTimeout(() => {
-        if (negotiationCompleteResolveRef.current === resolve) {
-          negotiationCompleteResolveRef.current = null;
-        }
-        resolve(false);
-      }, timeoutMs);
-
-      negotiationCompleteResolveRef.current = (value: boolean) => {
-        window.clearTimeout(timer);
-        negotiationCompleteResolveRef.current = null;
-        resolve(value);
-      };
-    });
-  }, []);
-
   const requestPostMortemWithRetry = useCallback(
     async (attempts: number = 4, delayMs: number = 800) => {
       if (!sessionId) return;
@@ -369,6 +336,79 @@ export function NegotiationClient() {
       throw lastError;
     },
     [sessionId]
+  );
+
+  /**
+   * Complete post-mortem workflow:
+   * 1. Complete S3 upload with visibility setting
+   * 2. Get presigned URL from response
+   * 3. Update post-mortem with video URL
+   * 4. Run post-mortem analysis
+   * 5. Navigate to post-mortem page
+   */
+  const handleVisibilitySelect = useCallback(
+    async (isPublic: boolean) => {
+      setShowVisibilityDialog(false);
+      setIsProcessingPostMortem(true);
+
+      const urlParams = new URLSearchParams(window.location.search);
+      const currentSessionId = urlParams.get("sessionId") || sessionId;
+
+      if (!currentSessionId) {
+        console.error("No session ID available");
+        router.push("/dashboard");
+        return;
+      }
+
+      try {
+        // Step 1: Complete S3 upload with visibility
+        setProcessingStatus("Completing video upload...");
+        let videoUrl: string | null = null;
+
+        if (uploadIdRef.current && uploadedPartsRef.current.length > 0) {
+          console.log("Completing multipart upload with visibility:", isPublic);
+          const result = await completeMultipartUpload(
+            currentSessionId,
+            uploadIdRef.current,
+            uploadedPartsRef.current,
+            isPublic
+          );
+          videoUrl = result.video_url;
+          console.log("Video upload completed:", videoUrl);
+
+          // Step 2 & 3: Update post-mortem with video URL
+          if (videoUrl) {
+            setProcessingStatus("Linking video to analysis...");
+            try {
+              await updatePostMortemVideoUrl(currentSessionId, videoUrl);
+              console.log("Video URL linked to post-mortem");
+            } catch (err) {
+              console.warn("Failed to link video to post-mortem:", err);
+            }
+          }
+        } else {
+          console.log("No video parts to upload");
+        }
+
+        // Step 4: Run post-mortem analysis
+        setProcessingStatus("Analyzing your negotiation...");
+        try {
+          await requestPostMortemWithRetry();
+          console.log("Post-mortem analysis complete");
+        } catch (err) {
+          console.error("Failed to run post-mortem analysis:", err);
+        }
+
+        // Step 5: Navigate to post-mortem page
+        setProcessingStatus("Loading your results...");
+        router.push(`/postmortem/${currentSessionId}`);
+      } catch (err) {
+        console.error("Error in post-mortem workflow:", err);
+        // Navigate anyway to show whatever analysis we have
+        router.push(`/postmortem/${currentSessionId}`);
+      }
+    },
+    [sessionId, router, requestPostMortemWithRetry]
   );
 
   useEffect(() => {
@@ -518,7 +558,6 @@ export function NegotiationClient() {
   useEffect(() => {
     if (!sessionId || phase !== "call") return;
     negotiationCompleteRef.current = false;
-    negotiationCompleteResolveRef.current = null;
     const wsUrl = `${getWsBaseUrl()}/api/v1/ws/negotiation/${sessionId}`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
@@ -639,17 +678,23 @@ export function NegotiationClient() {
             setAgentStatus("idle");
             setAgentActivity(0);
             isTtsPlayingRef.current = false;
-            // If negotiation was completed, auto-end after audio finishes
+            // If negotiation was completed, stop recording and show visibility dialog
             if (negotiationCompleteRef.current && !autoEndRef.current) {
               autoEndRef.current = true;
-              endCall();
+              // Stop recording to finalize the upload
+              if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+                mediaRecorderRef.current.stop();
+              }
+              // Show visibility dialog after a brief delay for final upload
+              window.setTimeout(() => {
+                setShowVisibilityDialog(true);
+              }, 500);
             }
           }, remaining * 1000 + 40);
         }
         if (data.type === "negotiation_complete") {
-          // Mark negotiation as complete - will auto-navigate after audio finishes
+          // Mark negotiation as complete - will show visibility dialog after audio finishes
           negotiationCompleteRef.current = true;
-          negotiationCompleteResolveRef.current?.(true);
           // Show a brief "Deal closed!" status
           setCoachSuggestions((prev) => [
             {
@@ -744,24 +789,13 @@ export function NegotiationClient() {
     };
   }, [stream, isMuted, socketReady, phase, stopTtsPlayback]);
 
-  const handleNavigateToPostMortem = useCallback(async () => {
-    // Stop all tracks
-    stream?.getTracks().forEach((track) => track.stop());
-
-    if (sessionId) {
-      try {
-        await requestPostMortemWithRetry();
-      } catch (error) {
-        console.error("Failed to request post-mortem analysis:", error);
-      }
-    }
-    router.push(`/postmortem/${sessionId || "current-session"}`);
-  }, [requestPostMortemWithRetry, router, stream, sessionId]);
-
   const handleEndSession = useCallback(() => {
     autoEndRef.current = true;
 
-    // Stop recording and trigger the onstop handler
+    // Stop all tracks
+    stream?.getTracks().forEach((track) => track.stop());
+
+    // Stop recording and trigger the onstop handler (uploads final part)
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       mediaRecorderRef.current.stop();
     }
@@ -769,12 +803,12 @@ export function NegotiationClient() {
     if (wsRef.current) {
       wsRef.current.send(JSON.stringify({ type: "end_negotiation" }));
     }
-    endCall();
-    void (async () => {
-      await waitForNegotiationComplete();
-      await handleNavigateToPostMortem();
-    })();
-  }, [endCall, handleNavigateToPostMortem, waitForNegotiationComplete]);
+
+    // Wait briefly for final upload, then show visibility dialog
+    window.setTimeout(() => {
+      setShowVisibilityDialog(true);
+    }, 500);
+  }, [stream]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -796,17 +830,41 @@ export function NegotiationClient() {
   useEffect(() => {
     if (phase === "ended" && !autoEndRef.current) {
       autoEndRef.current = true;
-      handleEndSession();
+      // Stop recording and show visibility dialog
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
+      window.setTimeout(() => {
+        setShowVisibilityDialog(true);
+      }, 500);
     }
   }, [phase]);
 
-  // When ended, show a loading state while navigating to post-mortem
+  // Show visibility dialog or processing state
+  if (showVisibilityDialog || isProcessingPostMortem) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-night text-white">
+        {isProcessingPostMortem ? (
+          <div className="text-center">
+            <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-olive border-t-transparent" />
+            <div className="text-lg font-semibold">{processingStatus || "Processing..."}</div>
+            <p className="mt-2 text-sm text-white/60">This may take a few moments</p>
+          </div>
+        ) : null}
+        <VisibilityDialog
+          isOpen={showVisibilityDialog}
+          onSelect={handleVisibilitySelect}
+        />
+      </div>
+    );
+  }
+
+  // When ended but dialog not yet shown, show brief loading
   if (phase === "ended") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-night text-white">
         <div className="text-center">
-          <div className="text-lg font-semibold">Preparing your analysis...</div>
-          <p className="mt-2 text-sm text-white/60">Redirecting to post-mortem review</p>
+          <div className="text-lg font-semibold">Preparing...</div>
         </div>
       </div>
     );

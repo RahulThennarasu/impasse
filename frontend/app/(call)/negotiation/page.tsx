@@ -1,5 +1,10 @@
 import { NegotiationClient } from "./NegotiationClient";
+import { NegotiationProvider } from "./NegotiationContext";
 
 export default function NegotiationPage() {
-  return <NegotiationClient />;
+  return (
+    <NegotiationProvider>
+      <NegotiationClient />
+    </NegotiationProvider>
+  );
 }

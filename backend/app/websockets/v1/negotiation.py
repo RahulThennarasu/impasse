@@ -288,6 +288,18 @@ class NegotiationSession:
         ]
         return any(phrase in lowered for phrase in closing_phrases)
 
+    def _get_closing_message(self) -> str:
+        """Generate a brief closing message from the opponent."""
+        closing_messages = [
+            "Alright, we have a deal. I'll get the paperwork started.",
+            "Great, glad we could work this out. I'll send over the details.",
+            "Perfect, we're all set then. Good doing business with you.",
+            "Sounds good, we've got a deal. I'll follow up with next steps.",
+            "Alright, that works for me. Let's shake on it.",
+        ]
+        import random
+        return random.choice(closing_messages)
+
     async def process_user_message(self, user_text: str):
         """Process user's message through opponent and coach agents"""
         try:
@@ -299,6 +311,25 @@ class NegotiationSession:
                     "timestamp": datetime.now().isoformat(),
                     "turn": self.opponent.current_turn
                 })
+
+                # Generate and speak a closing message
+                closing_message = self._get_closing_message()
+                self.opponent.transcript.append({
+                    "role": "assistant",
+                    "content": closing_message,
+                    "timestamp": datetime.now().isoformat(),
+                    "turn": self.opponent.current_turn
+                })
+
+                # Send closing text to frontend
+                await self.websocket.send_json({
+                    "type": "opponent_text",
+                    "text": closing_message
+                })
+
+                # Generate and stream closing audio
+                await self.generate_and_stream_audio(closing_message)
+
                 final_advice = self.coach.get_final_advice(self.opponent.transcript)
                 hidden_state = self.opponent.get_hidden_state()
 
@@ -311,6 +342,7 @@ class NegotiationSession:
                     "final_advice": final_advice,
                 })
 
+                # Send negotiation complete - frontend will auto-navigate after audio ends
                 await self.websocket.send_json({
                     "type": "negotiation_complete",
                     "final_advice": final_advice,
@@ -318,7 +350,7 @@ class NegotiationSession:
                     "transcript": self.opponent.transcript,
                     "auto_ended": True
                 })
-                await self.websocket.close()
+                self.closed = True
                 return
 
             # Get opponent response
@@ -349,6 +381,7 @@ class NegotiationSession:
                     "final_advice": final_advice,
                 })
 
+                # Send negotiation complete - frontend will handle navigation after audio finishes
                 await self.websocket.send_json({
                     "type": "negotiation_complete",
                     "final_advice": final_advice,
@@ -357,7 +390,7 @@ class NegotiationSession:
                     "auto_ended": True
                 })
                 self.closed = True
-                await self.websocket.close()
+                # Don't close websocket here - let frontend handle cleanup after audio plays
                 return
 
             # Get coach analysis on a reduced cadence; only forward short actionable tips

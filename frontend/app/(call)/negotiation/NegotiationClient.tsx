@@ -639,12 +639,28 @@ export function NegotiationClient() {
             setAgentStatus("idle");
             setAgentActivity(0);
             isTtsPlayingRef.current = false;
+            // If negotiation was completed, auto-end after audio finishes
+            if (negotiationCompleteRef.current && !autoEndRef.current) {
+              autoEndRef.current = true;
+              endCall();
+            }
           }, remaining * 1000 + 40);
         }
         if (data.type === "negotiation_complete") {
-          setAgentStatus("idle");
+          // Mark negotiation as complete - will auto-navigate after audio finishes
           negotiationCompleteRef.current = true;
           negotiationCompleteResolveRef.current?.(true);
+          // Show a brief "Deal closed!" status
+          setCoachSuggestions((prev) => [
+            {
+              id: `deal-${Date.now()}`,
+              text: "Deal closed! Preparing your analysis...",
+              time: "now",
+              priority: "high",
+              category: "System",
+            },
+            ...prev,
+          ]);
         }
       } catch {
         setMediaError("Received malformed socket message.");
@@ -666,7 +682,7 @@ export function NegotiationClient() {
       wsRef.current = null;
       setSocketReady(false);
     };
-  }, [sessionId, scenario, phase]);
+  }, [sessionId, scenario, phase, endCall]);
 
   useEffect(() => {
     if (!stream || !wsRef.current || !socketReady || phase !== "call") return;

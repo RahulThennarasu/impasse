@@ -29,8 +29,7 @@ from pydantic import BaseModel
 from supabase import create_client, Client
 from app.core.config import settings
 from agents.scenario_agent.scenario import generate_scenario
-from deepgram import DeepgramClient, DeepgramClientOptions, LiveOptions
-from deepgram.clients.live.v1 import LiveTranscriptionEvents
+from deepgram import DeepgramClient, DeepgramClientOptions, LiveOptions, LiveTranscriptionEvents
 try:
     from cartesia import Cartesia
 except ImportError:

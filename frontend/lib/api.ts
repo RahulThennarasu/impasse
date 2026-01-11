@@ -38,8 +38,7 @@ const DEFAULT_API_BASE = "http://localhost:8000";
 const getApiBaseUrl = () =>
   process.env.NEXT_PUBLIC_API_BASE_URL ?? `${DEFAULT_API_BASE}/api/v1`;
 
-const getServerApiBaseUrl = () =>
-  process.env.API_BASE_URL ?? getApiBaseUrl();
+const getServerApiBaseUrl = () => process.env.API_BASE_URL ?? getApiBaseUrl();
 
 export const getWsBaseUrl = () => {
   const base = process.env.NEXT_PUBLIC_WS_BASE_URL ?? DEFAULT_API_BASE;
@@ -76,9 +75,12 @@ export async function requestPostMortem(sessionId: string) {
 }
 
 export async function fetchPostMortem(sessionId: string) {
-  const response = await fetch(`${getServerApiBaseUrl()}/post_mortem/${sessionId}`, {
-    cache: "no-store",
-  });
+  const response = await fetch(
+    `${getServerApiBaseUrl()}/post_mortem/${sessionId}`,
+    {
+      cache: "no-store",
+    }
+  );
 
   if (!response.ok) {
     throw new Error("Post-mortem fetch failed");

@@ -1,9 +1,11 @@
 from typing import List, Optional
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Application settings"""
+
+    model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
@@ -17,9 +19,6 @@ class Settings(BaseSettings):
     AWS_REGION: str = "us-east-1"
     S3_BUCKET_NAME: Optional[str] = None
     S3_PRESIGNED_URL_EXPIRATION: int = 3600  # 1 hour
-
-    class Config:
-        env_file = ".env"
 
 
 settings = Settings()

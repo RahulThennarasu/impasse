@@ -10,6 +10,8 @@ from agents.scenario_agent.scenario_prompt import create_prompt
 logger = logging.getLogger(__name__)
 
 # generates negotiation scenario and returns outputs for user, opponent, and coach
+
+
 def generate_scenario(context: str) -> Dict:
     client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
     model = os.getenv("GEMINI_SCENARIO_MODEL", "gemini-2.5-flash-lite")
@@ -41,7 +43,8 @@ def generate_scenario(context: str) -> Dict:
         texts = _collect_response_texts(response)
         sample = texts[0] if texts else ""
         if _is_truncated(sample):
-            retry_tokens = int(os.getenv("GEMINI_SCENARIO_TOKENS_RETRY", "2400"))
+            retry_tokens = int(
+                os.getenv("GEMINI_SCENARIO_TOKENS_RETRY", "2400"))
             response = _request(retry_tokens, compact=True)
             scenario = _extract_scenario_from_response(response)
         else:
@@ -138,6 +141,8 @@ def _is_truncated(text: str) -> bool:
     return stripped.count("{") > stripped.count("}")
 
 # transforms scenario data into flat format for OpponentAgent
+
+
 def _build_opponent_config(shared_context: Dict, opponent_briefing: Dict) -> Dict:
     # Build context string from shared_context
     context = f"""{shared_context.get('situation', '')}
@@ -166,7 +171,8 @@ def _build_opponent_config(shared_context: Dict, opponent_briefing: Dict) -> Dic
     # Build constraints list (combine constraints + non_negotiables)
     constraints = opponent_briefing.get("constraints", [])
     non_negotiables = opponent_briefing.get("non_negotiables", [])
-    all_constraints = constraints + [f"Non-negotiable: {n}" for n in non_negotiables]
+    all_constraints = constraints + \
+        [f"Non-negotiable: {n}" for n in non_negotiables]
 
     # Build information asymmetries string
     private_info = opponent_briefing.get("private_information", [])
@@ -196,7 +202,8 @@ def _build_opponent_config(shared_context: Dict, opponent_briefing: Dict) -> Dic
 
     # Build personality string from traits
     personality_traits = opponent_briefing.get("personality_traits", [])
-    personality_str = ", ".join(personality_traits) if personality_traits else "neutral"
+    personality_str = ", ".join(
+        personality_traits) if personality_traits else "neutral"
 
     # Build name from role and character name
     character_name = opponent_briefing.get("character_name", "")
@@ -219,6 +226,8 @@ def _build_opponent_config(shared_context: Dict, opponent_briefing: Dict) -> Dic
     }
 
 # transforms scenario data into flat format for CoachAgent
+
+
 def _build_coach_config(shared_context: Dict, user_briefing: Dict, opponent_briefing: Dict) -> Dict:
     """
     CoachAgent expects:
@@ -255,8 +264,10 @@ Downsides of walking away:
     tensions = []
     tensions.append(f"Stakes: {shared_context.get('stakes', '')}")
     tensions.append(f"\nUser's constraints:\n{_format_list(user_constraints)}")
-    tensions.append(f"\nUser's non-negotiables:\n{_format_list(user_non_negotiables)}")
-    tensions.append(f"\nOpponent's likely non-negotiables:\n{_format_list(opponent_non_negotiables)}")
+    tensions.append(
+        f"\nUser's non-negotiables:\n{_format_list(user_non_negotiables)}")
+    tensions.append(
+        f"\nOpponent's likely non-negotiables:\n{_format_list(opponent_non_negotiables)}")
     tensions_str = "\n".join(tensions)
 
     # Build negotiable items (user's perspective)
@@ -324,7 +335,8 @@ def _build_display_description(narrative: str, user_briefing: Dict, metadata: Di
 
     if skills:
         skills_text = ", ".join(skills[:3])
-        parts.append(f"This {difficulty} {domain} scenario will test your skills in {skills_text}.")
+        parts.append(
+            f"This {difficulty} {domain} scenario will test your skills in {skills_text}.")
 
     if parts:
         return " ".join(parts)
@@ -333,6 +345,8 @@ def _build_display_description(narrative: str, user_briefing: Dict, metadata: Di
     return f"A {difficulty} negotiation scenario where you play the role of {role}."
 
 # parses json from LLM responses
+
+
 def _parse_json_response(response_text: str) -> Dict:
     def _sanitize_json(text: str) -> str:
         text = text.strip()
@@ -358,7 +372,8 @@ def _parse_json_response(response_text: str) -> Dict:
                 out.append(ch)
                 continue
             if in_string and ch in "\n\r\t":
-                out.append({"\\n": "\\n", "\\r": "\\r", "\\t": "\\t"}.get(ch, ch))
+                out.append({"\\n": "\\n", "\\r": "\\r",
+                           "\\t": "\\t"}.get(ch, ch))
                 continue
             out.append(ch)
         return "".join(out)
@@ -400,8 +415,10 @@ def _parse_json_response(response_text: str) -> Dict:
             escaped = _escape_control_chars(candidate)
             parsed = _try_load(escaped) or _raw_decode(escaped)
         if parsed is None:
-            escaped_sanitized = _escape_control_chars(_sanitize_json(candidate))
-            parsed = _try_load(escaped_sanitized) or _raw_decode(escaped_sanitized)
+            escaped_sanitized = _escape_control_chars(
+                _sanitize_json(candidate))
+            parsed = _try_load(escaped_sanitized) or _raw_decode(
+                escaped_sanitized)
         if parsed is not None:
             return parsed
 
@@ -417,8 +434,10 @@ def _parse_json_response(response_text: str) -> Dict:
             escaped = _escape_control_chars(candidate)
             parsed = _try_load(escaped) or _raw_decode(escaped)
         if parsed is None:
-            escaped_sanitized = _escape_control_chars(_sanitize_json(candidate))
-            parsed = _try_load(escaped_sanitized) or _raw_decode(escaped_sanitized)
+            escaped_sanitized = _escape_control_chars(
+                _sanitize_json(candidate))
+            parsed = _try_load(escaped_sanitized) or _raw_decode(
+                escaped_sanitized)
         if parsed is not None:
             return parsed
 
@@ -434,8 +453,10 @@ def _parse_json_response(response_text: str) -> Dict:
             escaped = _escape_control_chars(candidate)
             parsed = _try_load(escaped) or _raw_decode(escaped)
         if parsed is None:
-            escaped_sanitized = _escape_control_chars(_sanitize_json(candidate))
-            parsed = _try_load(escaped_sanitized) or _raw_decode(escaped_sanitized)
+            escaped_sanitized = _escape_control_chars(
+                _sanitize_json(candidate))
+            parsed = _try_load(escaped_sanitized) or _raw_decode(
+                escaped_sanitized)
         if parsed is not None:
             return parsed
 
@@ -447,4 +468,5 @@ def _parse_json_response(response_text: str) -> Dict:
     if parsed is not None:
         return parsed
 
-    raise ValueError(f"Could not parse JSON from response: {response_text[:500]}...")
+    raise ValueError(
+        f"Could not parse JSON from response: {response_text[:500]}...")

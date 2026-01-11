@@ -37,8 +37,8 @@ class CoachAgent:
                 - info_asymmetries: What you know vs. what they know
         """
         self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        self.model = os.getenv("GROQ_COACH_MODEL", "groq/compound")
-        self.fallback_model = os.getenv("GROQ_COACH_FALLBACK_MODEL", "groq/compound-mini")
+        self.model = os.getenv("GROQ_COACH_MODEL", "llama-3.1-8b-instant")
+        self.fallback_model = os.getenv("GROQ_COACH_FALLBACK_MODEL", "llama-3.1-8b-instant")
         self.max_tip_tokens = int(os.getenv("GROQ_COACH_TIP_TOKENS", "80"))
         self.max_final_tokens = int(os.getenv("GROQ_COACH_FINAL_TOKENS", "120"))
         self.last_analyzed_turn = 0

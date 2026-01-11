@@ -48,8 +48,8 @@ class OpponentAgent:
                 - personality: Communication style (friendly, aggressive, etc.)
         """
         self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        self.model = os.getenv("GROQ_OPPONENT_MODEL", "groq/compound")
-        self.fallback_model = os.getenv("GROQ_OPPONENT_FALLBACK_MODEL", "groq/compound-mini")
+        self.model = os.getenv("GROQ_OPPONENT_MODEL", "llama-3.1-8b-instant")
+        self.fallback_model = os.getenv("GROQ_OPPONENT_FALLBACK_MODEL", "llama-3.1-8b-instant")
         self.max_history_messages = int(os.getenv("GROQ_OPPONENT_HISTORY", "6"))
         self.max_opening_tokens = int(os.getenv("GROQ_OPPONENT_OPENING_TOKENS", "100"))
         self.max_response_tokens = int(os.getenv("GROQ_OPPONENT_RESPONSE_TOKENS", "150"))

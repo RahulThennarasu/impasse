@@ -17,7 +17,7 @@ def generate_scenario(context: str) -> Dict:
     client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
     model = os.getenv("GEMINI_SCENARIO_MODEL", "gemini-2.5-flash-lite")
     fallback_model = os.getenv("GEMINI_SCENARIO_FALLBACK_MODEL", "gemini-2.5-flash")
-    groq_fallback_model = os.getenv("GROQ_SCENARIO_FALLBACK_MODEL", "groq/compound")
+    groq_fallback_model = os.getenv("GROQ_SCENARIO_FALLBACK_MODEL", "llama-3.1-8b-instant")
     logger.info(f"Scenario generation model: {model}")
     prompt = create_prompt(context)
 

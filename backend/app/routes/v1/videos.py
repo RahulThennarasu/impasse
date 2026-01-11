@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import boto3
 from botocore.exceptions import ClientError
+from botocore.config import Config
 
 from app.core.config import settings
 
@@ -38,6 +39,7 @@ def get_s3_client():
         aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
         aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
         region_name=settings.AWS_REGION,
+        config=Config(signature_version="s3v4"),
     )
 
 
@@ -149,11 +151,12 @@ async def get_presigned_upload_url(request: PresignedUrlRequest):
 
 def get_supabase_client():
     """Initialize and return a Supabase client for video metadata storage."""
-    if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
+    supabase_key = settings.SUPABASE_SERVICE_ROLE_KEY or settings.SUPABASE_API_KEY
+    if not settings.SUPABASE_URL or not supabase_key:
         return None
     try:
         from supabase import create_client
-        return create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+        return create_client(settings.SUPABASE_URL, supabase_key)
     except Exception as e:
         logger.warning(f"Supabase client unavailable: {e}")
         return None

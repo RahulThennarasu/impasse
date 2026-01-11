@@ -158,7 +158,7 @@ IMPORTANT INSTRUCTIONS:
 Return ONLY valid JSON, no other text."""
 
         response = self.client.chat.completions.create(
-            model=os.getenv("GROQ_POST_MORTEM_MODEL", "llama-3.3-70b-versatile"),
+            model=os.getenv("GROQ_POST_MORTEM_MODEL", "llama-3.1-8b-instant"),
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": analysis_prompt}

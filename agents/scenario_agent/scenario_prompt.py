@@ -94,5 +94,17 @@ REQUIREMENTS:
 - Compelling user_narrative (mission briefing style, concise)
 - If INPUT vague, make realistic assumptions
 
+IMPORTANT - CONCRETE NUMBERS:
+When the scenario involves quantifiable elements, ALWAYS include specific realistic numbers. Examples:
+- Salary negotiation: current salary, target salary, market rates, equity amounts, bonus figures
+- Real estate: asking price, your budget, comparable sales, closing costs
+- Business deals: contract value, payment terms, quantities, margins, deadlines
+- Vendor negotiations: quoted price, volume discounts, competitor pricing
+- Raise/promotion: current comp, target comp, budget constraints, percentage increases
+
+The user_narrative MUST mention key numbers upfront (e.g., "You're currently at $150,000..." or "The asking price is $425,000...").
+Both briefings should include specific figures in objectives, constraints, BATNA, and success_criteria.
+Numbers should be realistic for the domain and create meaningful negotiation ranges (not too wide, not too narrow).
+
 INPUT: {context}
 """.strip()

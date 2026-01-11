@@ -868,10 +868,10 @@ async def get_video_analytics(session_id: str):
                 detail=f"No video session found with ID: {session_id}"
             )
         
-        analytics = response.data[0].get("analysis", {})
+        analysis = response.data[0].get("analysis", {})
         logger.info(f"Retrieved analytics for session: {session_id}")
-        
-        return {"session_id": session_id, "analytics": analytics}
+
+        return {"session_id": session_id, "analysis": analysis}
         
     except HTTPException:
         raise

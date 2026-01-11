@@ -15,21 +15,22 @@ import json
 import asyncio
 import os
 import base64
+import sys
 from typing import Dict, Optional
-from agents.scenario_agent.scenario import generate_scenario
+
+# Add project root to path BEFORE importing agents
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../.."))
+
 from deepgram import DeepgramClient, DeepgramClientOptions, LiveOptions
 from deepgram.clients.live.v1 import LiveTranscriptionEvents
 try:
     from cartesia import Cartesia
 except ImportError:
-    # Fallback if cartesia not installed
     Cartesia = None
-import sys
 
-# Add agents to path
-sys.path.append(os.path.join(os.path.dirname(__file__), "../../../.."))
 from agents.op_agent.op import OpponentAgent
 from agents.coach_agent.coach import CoachAgent
+from agents.scenario_agent.scenario import generate_scenario
 
 logger = logging.getLogger(__name__)
 
@@ -308,30 +309,29 @@ class NegotiationSession:
             # Cartesia voice ID - professional male voice
             voice_id = os.getenv("CARTESIA_VOICE_ID", "a0e99841-438c-4a64-b679-ae501e7d6091")
 
-            # Output format for raw PCM audio
+            # Output format for raw PCM audio (16-bit signed, little-endian)
             output_format = {
                 "container": "raw",
-                "encoding": "pcm_f32le",
+                "encoding": "pcm_s16le",
                 "sample_rate": 44100,
             }
 
-            # Stream audio chunks using SSE (Server-Sent Events)
-            # The new Cartesia SDK returns chunks with .data attribute
+            # Stream audio chunks using SSE
+            # Cartesia SDK returns dict with 'audio' key containing bytes
             for chunk in self.cartesia_client.tts.sse(
-                model_id="sonic-2024-10-01",
+                model_id="sonic-3",
                 transcript=text,
-                voice={"mode": "id", "id": voice_id},
-                language="en",
+                voice_id=voice_id,
                 output_format=output_format,
             ):
-                # New SDK returns chunk objects with .data attribute containing bytes
-                if chunk and hasattr(chunk, 'data') and chunk.data:
-                    audio_base64 = base64.b64encode(chunk.data).decode()
+                audio_bytes = chunk.get("audio") if isinstance(chunk, dict) else chunk
+                if audio_bytes:
+                    audio_base64 = base64.b64encode(audio_bytes).decode()
                     await self.websocket.send_json({
                         "type": "audio_chunk",
                         "data": audio_base64,
                         "sample_rate": 44100,
-                        "encoding": "pcm_f32le"
+                        "encoding": "pcm_s16le"
                     })
 
             # Notify frontend that audio is complete
@@ -539,10 +539,91 @@ async def update_negotiation_scenario_info(session_id: str, scenario_info: str):
     session = get_negotiation_session(session_id)
     if not session:
         return {"error": "Session not found", "session_id": session_id}
-    
+
     scenario_para = generate_scenario(scenario_info)
     logger.info(f"Session {session_id}: Scenario info updated")
-    
+
     return {
         "scenario_paragraph": scenario_para
     }
+
+
+@negotiation_router.websocket("/ws/tts")
+async def websocket_tts(websocket: WebSocket):
+    """
+    Simple TTS WebSocket endpoint for testing.
+    Send: {"text": "Hello world"}
+    Receive: audio_start, audio_chunk (base64), audio_end
+    """
+    await websocket.accept()
+    logger.info("TTS test client connected")
+
+    try:
+        # Initialize Cartesia
+        if not Cartesia:
+            await websocket.send_json({
+                "type": "error",
+                "message": "Cartesia not installed"
+            })
+            return
+
+        cartesia_client = Cartesia(api_key=os.getenv("CARTESIA_API_KEY"))
+
+        while True:
+            data = await websocket.receive_json()
+            text = data.get("text", "").strip()
+
+            if not text:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "No text provided"
+                })
+                continue
+
+            logger.info(f"TTS request: {text[:50]}...")
+
+            try:
+                # Notify start
+                await websocket.send_json({"type": "audio_start"})
+
+                # Voice ID and output format (16-bit signed, little-endian)
+                voice_id = os.getenv("CARTESIA_VOICE_ID", "a0e99841-438c-4a64-b679-ae501e7d6091")
+                output_format = {
+                    "container": "raw",
+                    "encoding": "pcm_s16le",
+                    "sample_rate": 44100,
+                }
+
+                # Stream TTS audio using voice_id parameter
+                # Cartesia SDK returns dict with 'audio' key containing bytes
+                for chunk in cartesia_client.tts.sse(
+                    model_id="sonic-3",
+                    transcript=text,
+                    voice_id=voice_id,
+                    output_format=output_format,
+                ):
+                    audio_bytes = chunk.get("audio") if isinstance(chunk, dict) else chunk
+                    if audio_bytes:
+                        audio_base64 = base64.b64encode(audio_bytes).decode()
+                        await websocket.send_json({
+                            "type": "audio_chunk",
+                            "data": audio_base64,
+                            "sample_rate": 44100,
+                            "encoding": "pcm_s16le"
+                        })
+
+                # Notify end
+                await websocket.send_json({"type": "audio_end"})
+                logger.info("TTS stream complete")
+
+            except Exception as e:
+                logger.error(f"TTS error: {e}", exc_info=True)
+                await websocket.send_json({
+                    "type": "error",
+                    "message": str(e)
+                })
+
+    except WebSocketDisconnect:
+        logger.info("TTS test client disconnected")
+    except Exception as e:
+        logger.error(f"TTS WebSocket error: {e}")

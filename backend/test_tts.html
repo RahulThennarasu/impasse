@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cartesia TTS Test</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #1a1a2e;
+            color: #eee;
+        }
+        h1 { color: #00d4ff; margin-bottom: 10px; }
+        p.subtitle { color: #888; margin-bottom: 30px; }
+        textarea {
+            width: 100%;
+            height: 120px;
+            padding: 15px;
+            font-size: 16px;
+            border: 2px solid #333;
+            border-radius: 8px;
+            background: #0f0f1a;
+            color: #fff;
+            resize: vertical;
+        }
+        textarea:focus { outline: none; border-color: #00d4ff; }
+        button {
+            margin-top: 15px;
+            padding: 12px 30px;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        #speakBtn { background: #00d4ff; color: #000; }
+        #speakBtn:hover:not(:disabled) { background: #00b8e6; transform: translateY(-1px); }
+        #speakBtn:disabled { background: #555; color: #888; cursor: not-allowed; }
+        #stopBtn { background: #ff4757; color: #fff; margin-left: 10px; display: none; }
+        #stopBtn:hover { background: #ff3344; }
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            background: #0f0f1a;
+            border: 1px solid #333;
+        }
+        .status-label { color: #888; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+        .status-text { margin-top: 5px; font-size: 14px; }
+        .status-text.success { color: #2ed573; }
+        .status-text.error { color: #ff4757; }
+        .status-text.loading { color: #ffa502; }
+        .audio-viz {
+            margin-top: 20px;
+            height: 60px;
+            background: #0f0f1a;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+        }
+        .bar {
+            width: 4px;
+            height: 10px;
+            background: #00d4ff;
+            border-radius: 2px;
+        }
+        .audio-viz.playing .bar { animation: pulse 0.5s ease-in-out infinite alternate; }
+        @keyframes pulse {
+            from { height: 10px; opacity: 0.5; }
+            to { height: 40px; opacity: 1; }
+        }
+        .bar:nth-child(1) { animation-delay: 0s; }
+        .bar:nth-child(2) { animation-delay: 0.1s; }
+        .bar:nth-child(3) { animation-delay: 0.2s; }
+        .bar:nth-child(4) { animation-delay: 0.3s; }
+        .bar:nth-child(5) { animation-delay: 0.4s; }
+        .bar:nth-child(6) { animation-delay: 0.3s; }
+        .bar:nth-child(7) { animation-delay: 0.2s; }
+        .bar:nth-child(8) { animation-delay: 0.1s; }
+    </style>
+</head>
+<body>
+    <h1>Cartesia TTS Test</h1>
+    <p class="subtitle">Enter text below and click Speak to hear it</p>
+
+    <textarea id="textInput" placeholder="Enter text to speak...">Hello! I'm your AI negotiation opponent. Let's discuss the terms of our agreement.</textarea>
+
+    <div>
+        <button id="speakBtn">Speak</button>
+        <button id="stopBtn">Stop</button>
+    </div>
+
+    <div class="audio-viz" id="audioViz">
+        <div class="bar"></div>
+        <div class="bar"></div>
+        <div class="bar"></div>
+        <div class="bar"></div>
+        <div class="bar"></div>
+        <div class="bar"></div>
+        <div class="bar"></div>
+        <div class="bar"></div>
+    </div>
+
+    <div class="status">
+        <div class="status-label">Status</div>
+        <div class="status-text" id="statusText">Ready</div>
+    </div>
+
+    <script>
+        const textInput = document.getElementById('textInput');
+        const speakBtn = document.getElementById('speakBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const statusText = document.getElementById('statusText');
+        const audioViz = document.getElementById('audioViz');
+
+        let audioContext = null;
+        let isPlaying = false;
+        let currentAudio = null;
+
+        function setStatus(text, type = '') {
+            statusText.textContent = text;
+            statusText.className = 'status-text ' + type;
+        }
+
+        function setPlaying(playing) {
+            isPlaying = playing;
+            speakBtn.disabled = playing;
+            stopBtn.style.display = playing ? 'inline-block' : 'none';
+            audioViz.classList.toggle('playing', playing);
+        }
+
+        async function speak() {
+            const text = textInput.value.trim();
+            if (!text) {
+                setStatus('Please enter some text', 'error');
+                return;
+            }
+
+            setPlaying(true);
+            setStatus('Connecting...', 'loading');
+
+            try {
+                const ws = new WebSocket('ws://localhost:8000/api/v1/ws/tts');
+                let audioChunks = [];
+
+                ws.onopen = () => {
+                    setStatus('Generating speech...', 'loading');
+                    ws.send(JSON.stringify({ text: text }));
+                };
+
+                ws.onmessage = async (event) => {
+                    const data = JSON.parse(event.data);
+
+                    if (data.type === 'audio_start') {
+                        audioChunks = [];
+                        setStatus('Receiving audio...', 'loading');
+                    } else if (data.type === 'audio_chunk') {
+                        // Decode base64 to bytes
+                        const binaryString = atob(data.data);
+                        const bytes = new Uint8Array(binaryString.length);
+                        for (let i = 0; i < binaryString.length; i++) {
+                            bytes[i] = binaryString.charCodeAt(i);
+                        }
+                        audioChunks.push(bytes);
+                    } else if (data.type === 'audio_end') {
+                        ws.close();
+
+                        // Combine all chunks
+                        const totalLength = audioChunks.reduce((acc, chunk) => acc + chunk.length, 0);
+                        const combinedBytes = new Uint8Array(totalLength);
+                        let offset = 0;
+                        for (const chunk of audioChunks) {
+                            combinedBytes.set(chunk, offset);
+                            offset += chunk.length;
+                        }
+
+                        // Create WAV blob and play
+                        const wavBlob = createWavBlob(combinedBytes, 44100);
+                        const audioUrl = URL.createObjectURL(wavBlob);
+
+                        setStatus('Playing audio...', 'success');
+                        currentAudio = new Audio(audioUrl);
+                        currentAudio.onended = () => {
+                            setStatus('Complete!', 'success');
+                            setPlaying(false);
+                            URL.revokeObjectURL(audioUrl);
+                        };
+                        currentAudio.onerror = (e) => {
+                            setStatus('Audio playback error', 'error');
+                            setPlaying(false);
+                        };
+                        currentAudio.play();
+                    } else if (data.type === 'error') {
+                        setStatus('Error: ' + data.message, 'error');
+                        setPlaying(false);
+                        ws.close();
+                    }
+                };
+
+                ws.onerror = () => {
+                    setStatus('WebSocket error - is the server running?', 'error');
+                    setPlaying(false);
+                };
+
+                ws.onclose = () => {
+                    if (isPlaying && !currentAudio) {
+                        setPlaying(false);
+                    }
+                };
+
+            } catch (err) {
+                setStatus('Error: ' + err.message, 'error');
+                setPlaying(false);
+            }
+        }
+
+        // Create WAV file from PCM s16le data
+        function createWavBlob(pcmData, sampleRate) {
+            const numChannels = 1;
+            const bitsPerSample = 16;
+            const byteRate = sampleRate * numChannels * bitsPerSample / 8;
+            const blockAlign = numChannels * bitsPerSample / 8;
+            const dataSize = pcmData.length;
+            const headerSize = 44;
+            const totalSize = headerSize + dataSize;
+
+            const buffer = new ArrayBuffer(totalSize);
+            const view = new DataView(buffer);
+
+            // RIFF header
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, totalSize - 8, true);
+            writeString(view, 8, 'WAVE');
+
+            // fmt chunk
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true); // chunk size
+            view.setUint16(20, 1, true);  // PCM format
+            view.setUint16(22, numChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, byteRate, true);
+            view.setUint16(32, blockAlign, true);
+            view.setUint16(34, bitsPerSample, true);
+
+            // data chunk
+            writeString(view, 36, 'data');
+            view.setUint32(40, dataSize, true);
+
+            // Copy PCM data
+            const dataView = new Uint8Array(buffer, headerSize);
+            dataView.set(pcmData);
+
+            return new Blob([buffer], { type: 'audio/wav' });
+        }
+
+        function writeString(view, offset, string) {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
+        }
+
+        function stop() {
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio = null;
+            }
+            setPlaying(false);
+            setStatus('Stopped', '');
+        }
+
+        speakBtn.addEventListener('click', speak);
+        stopBtn.addEventListener('click', stop);
+        textInput.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'Enter') speak();
+        });
+    </script>
+</body>
+</html>

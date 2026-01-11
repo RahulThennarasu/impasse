@@ -289,6 +289,22 @@ class NegotiationSession:
             # Generate audio from opponent response
             await self.generate_and_stream_audio(opponent_response)
 
+            # Check if opponent closed the deal
+            if self._is_deal_closed(opponent_response):
+                logger.info(f"Session {self.session_id}: Deal closed by opponent")
+                final_advice = self.coach.get_final_advice(self.opponent.transcript)
+                hidden_state = self.opponent.get_hidden_state()
+                await self.websocket.send_json({
+                    "type": "negotiation_complete",
+                    "final_advice": final_advice,
+                    "hidden_state": hidden_state,
+                    "transcript": self.opponent.transcript,
+                    "auto_ended": True
+                })
+                self.closed = True
+                await self.websocket.close()
+                return
+
             # Get coach analysis on a reduced cadence; only forward short actionable tips
             self.user_turns += 1
             cadence = self.coach_early_every_n_turns if self.user_turns <= self.coach_early_turns else self.coach_every_n_turns
@@ -454,6 +470,30 @@ class NegotiationSession:
         if "accept" in lowered and ("not" in lowered or "don't" in lowered or "do not" in lowered):
             return False
         return any(phrase in lowered for phrase in self.acceptance_phrases)
+
+    def _is_deal_closed(self, opponent_response: str) -> bool:
+        """Check if opponent's response indicates deal has been closed."""
+        lowered = opponent_response.lower()
+        # Phrases indicating opponent is closing the deal
+        closing_phrases = [
+            "we have a deal",
+            "we've got a deal",
+            "we got a deal",
+            "deal is done",
+            "it's a deal",
+            "that's a deal",
+            "shake on it",
+            "i'll get the paperwork",
+            "i'll draw up the",
+            "i'll send over the",
+            "pleasure doing business",
+            "look forward to working",
+            "welcome aboard",
+            "congratulations",
+            "let's finalize",
+            "we're all set",
+        ]
+        return any(phrase in lowered for phrase in closing_phrases)
 
     def _schedule_transcript_flush(self):
         if not self.loop:

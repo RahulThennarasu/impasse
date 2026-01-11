@@ -6,12 +6,12 @@ OUTPUT: Valid JSON only, matching this structure:
   "scenario_id": "kebab-case-id",
   "scenario_title": "Brief Title",
   "shared_context": {{
-    "situation": "1-2 paragraphs both parties know",
+    "situation": "4-6 sentences both parties know",
     "relationship_history": "prior relationship",
     "setting": "where/when",
     "stakes": "what's at stake"
   }},
-  "user_narrative": "3-4 paragraph immersive 2nd-person briefing. Set scene, establish role/stakes, hint at leverage/constraints. Mission briefing style—engaging, no tactical advice.",
+  "user_narrative": "1-2 short paragraphs (total 6-10 sentences) immersive 2nd-person briefing. Set scene, establish role/stakes, hint at leverage/constraints. Mission briefing style—engaging, no tactical advice.",
   "user_briefing": {{
     "role_name": "title",
     "role_description": "2-3 sentences",
@@ -91,7 +91,7 @@ REQUIREMENTS:
 - Meaningful information asymmetry—each party has private knowledge
 - Challenging but fair—neither side obviously dominant
 - Opponent briefing detailed enough for AI role-play
-- Compelling user_narrative (mission briefing style)
+- Compelling user_narrative (mission briefing style, concise)
 - If INPUT vague, make realistic assumptions
 
 INPUT: {context}

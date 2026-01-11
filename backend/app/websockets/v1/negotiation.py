@@ -47,7 +47,7 @@ negotiation_router = APIRouter()
 
 def get_supabase_client():
     """Initialize and return a Supabase client"""
-    if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
+    if not settings.SUPABASE_URL or not settings.SUPABASE_API_KEY:
         raise HTTPException(
             status_code=500,
             detail="Supabase credentials not configured"
@@ -59,7 +59,8 @@ def get_supabase_client():
             status_code=500,
             detail=f"Supabase client unavailable: {e}"
         )
-    return create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+
+    return create_client(settings.SUPABASE_URL, settings.SUPABASE_API_KEY)
 
 
 class NegotiationSession:
@@ -742,18 +743,20 @@ async def create_video_session(request: VideoSessionRequest):
         supabase = get_supabase_client()
         
         # Generate a new UUID for the session
-        session_id = str(uuid.uuid4())
+        # session_id = str(uuid.uuid4())
         
         # Insert the new video session into the database
-        response = supabase.table("videos").insert({
-            "uuid": session_id,
+        response = supabase.table("recordings").insert({
+            # "id": session_id,
             "link": request.link
         }).execute()
+        # print("Response data", response.data)
+        session_id = response.data[0].get("id")
         
-        logger.info(f"Created video session: {session_id}")
+        # logger.info(f"Created video session: {session_id}")
         
         # Extract created_at from the response
-        if response.data and len(response.data) > 0:
+        if response.data and len(response.data) > 0 and response.data[0]:
             created_at = response.data[0].get("created_at", "")
             return VideoSessionResponse(
                 session_id=session_id,
@@ -784,10 +787,10 @@ async def get_all_video_links():
         supabase = get_supabase_client()
         
         # Fetch all video records from the database
-        response = supabase.table("videos").select("*").execute()
+        response = supabase.table("recordings").select("*").execute()
         
         logger.info(f"Retrieved {len(response.data)} video records")
-        
+
         return VideoLinksResponse(
             videos=response.data
         )

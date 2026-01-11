@@ -2,6 +2,7 @@
 
 # API clients
 groq>=0.4.0          # For Groq LLM access
+google-genai>=1.0.0  # For Gemini scenario generation
 
 # Backend
 fastapi>=0.104.0

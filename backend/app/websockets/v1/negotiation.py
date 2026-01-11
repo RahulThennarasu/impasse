@@ -9,7 +9,7 @@ Flow:
 5. Stream audio back to user
 """
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 import logging
 import json
 import asyncio
@@ -17,17 +17,23 @@ import os
 import base64
 import sys
 from typing import Dict, Optional
+import sys
 
-# Add project root to path BEFORE importing agents
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../.."))
+# Add agents to path
+sys.path.append(os.path.join(os.path.dirname(__file__), "../../../.."))
 
+from pydantic import BaseModel
+from agents.scenario_agent.scenario import generate_scenario
 from deepgram import DeepgramClient, DeepgramClientOptions, LiveOptions
 from deepgram.clients.live.v1 import LiveTranscriptionEvents
 try:
     from cartesia import Cartesia
 except ImportError:
     Cartesia = None
+import sys
 
+# Add agents to path
+sys.path.append(os.path.join(os.path.dirname(__file__), "../../../.."))
 from agents.op_agent.op import OpponentAgent
 from agents.coach_agent.coach import CoachAgent
 from agents.scenario_agent.scenario import generate_scenario
@@ -533,6 +539,32 @@ async def get_negotiation_session(session_id: str):
         "status": "active"
     }
 
+
+class ScenarioContextRequest(BaseModel):
+    keywords: str
+
+
+@negotiation_router.post("/scenario_context")
+async def create_scenario_context(payload: ScenarioContextRequest):
+    try:
+        scenario = generate_scenario(payload.keywords)
+        if not isinstance(scenario, dict):
+            raise ValueError("Scenario generation failed")
+
+        title = (scenario.get("title") or scenario.get("scenario_title") or scenario.get("scenario_id") or "Practice scenario")
+        role = (scenario.get("role") or "Participant")
+        description = scenario.get("description") or scenario.get("user_narrative") or ""
+
+        return {
+            "title": title,
+            "role": role,
+            "description": description,
+            "agent_id": "opponent"
+        }
+    except Exception as e:
+        logger.error(f"Scenario generation failed: {e}")
+        raise HTTPException(status_code=500, detail="Scenario generation failed")
+
 @negotiation_router.post("/negotation/session/{session_id}/scenario_info")
 async def update_negotiation_scenario_info(session_id: str, scenario_info: str):
     """Update scenario information for a video call session"""
@@ -546,84 +578,3 @@ async def update_negotiation_scenario_info(session_id: str, scenario_info: str):
     return {
         "scenario_paragraph": scenario_para
     }
-
-
-@negotiation_router.websocket("/ws/tts")
-async def websocket_tts(websocket: WebSocket):
-    """
-    Simple TTS WebSocket endpoint for testing.
-    Send: {"text": "Hello world"}
-    Receive: audio_start, audio_chunk (base64), audio_end
-    """
-    await websocket.accept()
-    logger.info("TTS test client connected")
-
-    try:
-        # Initialize Cartesia
-        if not Cartesia:
-            await websocket.send_json({
-                "type": "error",
-                "message": "Cartesia not installed"
-            })
-            return
-
-        cartesia_client = Cartesia(api_key=os.getenv("CARTESIA_API_KEY"))
-
-        while True:
-            data = await websocket.receive_json()
-            text = data.get("text", "").strip()
-
-            if not text:
-                await websocket.send_json({
-                    "type": "error",
-                    "message": "No text provided"
-                })
-                continue
-
-            logger.info(f"TTS request: {text[:50]}...")
-
-            try:
-                # Notify start
-                await websocket.send_json({"type": "audio_start"})
-
-                # Voice ID and output format (16-bit signed, little-endian)
-                voice_id = os.getenv("CARTESIA_VOICE_ID", "a0e99841-438c-4a64-b679-ae501e7d6091")
-                output_format = {
-                    "container": "raw",
-                    "encoding": "pcm_s16le",
-                    "sample_rate": 44100,
-                }
-
-                # Stream TTS audio using voice_id parameter
-                # Cartesia SDK returns dict with 'audio' key containing bytes
-                for chunk in cartesia_client.tts.sse(
-                    model_id="sonic-3",
-                    transcript=text,
-                    voice_id=voice_id,
-                    output_format=output_format,
-                ):
-                    audio_bytes = chunk.get("audio") if isinstance(chunk, dict) else chunk
-                    if audio_bytes:
-                        audio_base64 = base64.b64encode(audio_bytes).decode()
-                        await websocket.send_json({
-                            "type": "audio_chunk",
-                            "data": audio_base64,
-                            "sample_rate": 44100,
-                            "encoding": "pcm_s16le"
-                        })
-
-                # Notify end
-                await websocket.send_json({"type": "audio_end"})
-                logger.info("TTS stream complete")
-
-            except Exception as e:
-                logger.error(f"TTS error: {e}", exc_info=True)
-                await websocket.send_json({
-                    "type": "error",
-                    "message": str(e)
-                })
-
-    except WebSocketDisconnect:
-        logger.info("TTS test client disconnected")
-    except Exception as e:
-        logger.error(f"TTS WebSocket error: {e}")

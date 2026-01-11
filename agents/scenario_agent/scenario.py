@@ -1,32 +1,52 @@
-from groq import Groq
 import os
+from google import genai
 import json
+import logging
 import re
 from typing import Dict
 
 from agents.scenario_agent.scenario_prompt import create_prompt
 
+logger = logging.getLogger(__name__)
+
 # generates negotiation scenario and returns outputs for user, opponent, and coach
 def generate_scenario(context: str) -> Dict:
-    client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-    model = os.getenv("GROQ_SCENARIO_MODEL", "llama-3.3-70b-versatile")
+    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+    model = os.getenv("GEMINI_SCENARIO_MODEL", "gemini-2.5-flash-lite")
+    logger.info(f"Scenario generation model: {model}")
     prompt = create_prompt(context)
 
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
-            {
-                "role": "system",
-                "content": "Return only valid JSON that matches the requested schema. No extra text."
-            },
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.4,
-        max_tokens=int(os.getenv("GROQ_SCENARIO_TOKENS", "900")),
-    )
+    def _request(max_tokens: int, compact: bool):
+        contents = prompt
+        if compact:
+            contents += (
+                "\n\nCRITICAL: Keep all fields concise. Limit any list to 3 items. "
+                "Keep user_narrative to 2 short paragraphs."
+            )
+        return client.models.generate_content(
+            model=model,
+            contents=contents,
+            config=genai.types.GenerateContentConfig(
+                temperature=0.4,
+                max_output_tokens=max_tokens,
+                response_mime_type="application/json",
+            ),
+        )
 
-    scenario_text = response.choices[0].message.content or ""
-    scenario = _parse_json_response(scenario_text)
+    max_tokens = int(os.getenv("GEMINI_SCENARIO_TOKENS", "2000"))
+    response = _request(max_tokens, compact=False)
+    try:
+        scenario = _extract_scenario_from_response(response)
+    except Exception:
+        texts = _collect_response_texts(response)
+        sample = texts[0] if texts else ""
+        if _is_truncated(sample):
+            retry_tokens = int(os.getenv("GEMINI_SCENARIO_TOKENS_RETRY", "2400"))
+            response = _request(retry_tokens, compact=True)
+            scenario = _extract_scenario_from_response(response)
+        else:
+            raise
+    # scenario is parsed above
 
     # Transform opponent data into format OpponentAgent expects
     opponent_agent_config = _build_opponent_config(
@@ -65,6 +85,57 @@ def generate_scenario(context: str) -> Dict:
         "coach_agent_config": coach_agent_config,
         "scenario_metadata": scenario.get("scenario_metadata")
     }
+
+
+def _extract_scenario_from_response(response) -> Dict:
+    if hasattr(response, "parsed") and response.parsed is not None:
+        if isinstance(response.parsed, dict):
+            return response.parsed
+        if isinstance(response.parsed, str):
+            try:
+                return _parse_json_response(response.parsed)
+            except Exception:
+                pass
+
+    candidates = _collect_response_texts(response)
+    logger.info(
+        "Scenario response candidates: text=%s, candidates=%s",
+        bool(getattr(response, "text", None)),
+        len(getattr(response, "candidates", []) or []),
+    )
+
+    for candidate in candidates:
+        try:
+            return _parse_json_response(candidate)
+        except Exception:
+            continue
+
+    raise ValueError("Could not parse JSON from response: <empty>")
+
+
+def _collect_response_texts(response) -> list[str]:
+    candidates: list[str] = []
+    if hasattr(response, "text") and response.text:
+        candidates.append(response.text)
+
+    if hasattr(response, "candidates"):
+        for cand in response.candidates or []:
+            content = getattr(cand, "content", None)
+            if content and getattr(content, "parts", None):
+                for part in content.parts:
+                    text = getattr(part, "text", None)
+                    if text:
+                        candidates.append(text)
+    return candidates
+
+
+def _is_truncated(text: str) -> bool:
+    if not text:
+        return True
+    stripped = text.strip()
+    if not stripped.endswith("}"):
+        return True
+    return stripped.count("{") > stripped.count("}")
 
 # transforms scenario data into flat format for OpponentAgent
 def _build_opponent_config(shared_context: Dict, opponent_briefing: Dict) -> Dict:
@@ -263,23 +334,117 @@ def _build_display_description(narrative: str, user_briefing: Dict, metadata: Di
 
 # parses json from LLM responses
 def _parse_json_response(response_text: str) -> Dict:
-    try:
-        return json.loads(response_text)
-    except json.JSONDecodeError:
-        pass
+    def _sanitize_json(text: str) -> str:
+        text = text.strip()
+        # Remove trailing commas before closing braces/brackets.
+        text = re.sub(r",\s*([}\]])", r"\1", text)
+        return text
+
+    def _escape_control_chars(text: str) -> str:
+        out = []
+        in_string = False
+        escape = False
+        for ch in text:
+            if escape:
+                escape = False
+                out.append(ch)
+                continue
+            if ch == "\\":
+                escape = True
+                out.append(ch)
+                continue
+            if ch == "\"":
+                in_string = not in_string
+                out.append(ch)
+                continue
+            if in_string and ch in "\n\r\t":
+                out.append({"\\n": "\\n", "\\r": "\\r", "\\t": "\\t"}.get(ch, ch))
+                continue
+            out.append(ch)
+        return "".join(out)
+
+    def _strip_invalid_controls(text: str) -> str:
+        # Remove non-printable control chars (except whitespace) that break json parsing.
+        return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
+
+    def _raw_decode(text: str) -> Dict | None:
+        decoder = json.JSONDecoder()
+        try:
+            obj, _ = decoder.raw_decode(text)
+            return obj
+        except json.JSONDecodeError:
+            return None
+
+    def _try_load(text: str) -> Dict | None:
+        if not text:
+            return None
+        try:
+            return json.loads(text, strict=False)
+        except json.JSONDecodeError:
+            return None
+
+    cleaned = _strip_invalid_controls(response_text)
+    direct = _try_load(cleaned) or _raw_decode(cleaned)
+    if direct is not None:
+        return direct
 
     json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', response_text)
     if json_match:
-        try:
-            return json.loads(json_match.group(1))
-        except json.JSONDecodeError:
-            pass
+        candidate = json_match.group(1)
+        candidate = _strip_invalid_controls(candidate)
+        parsed = _try_load(candidate) or _raw_decode(candidate)
+        if parsed is None:
+            sanitized = _sanitize_json(candidate)
+            parsed = _try_load(sanitized) or _raw_decode(sanitized)
+        if parsed is None:
+            escaped = _escape_control_chars(candidate)
+            parsed = _try_load(escaped) or _raw_decode(escaped)
+        if parsed is None:
+            escaped_sanitized = _escape_control_chars(_sanitize_json(candidate))
+            parsed = _try_load(escaped_sanitized) or _raw_decode(escaped_sanitized)
+        if parsed is not None:
+            return parsed
 
-    json_match = re.search(r'\{[\s\S]*\}', response_text)
-    if json_match:
-        try:
-            return json.loads(json_match.group(0))
-        except json.JSONDecodeError:
-            pass
+    brace_index = response_text.find("{")
+    if brace_index != -1:
+        candidate = response_text[brace_index:]
+        candidate = _strip_invalid_controls(candidate)
+        parsed = _try_load(candidate) or _raw_decode(candidate)
+        if parsed is None:
+            sanitized = _sanitize_json(candidate)
+            parsed = _try_load(sanitized) or _raw_decode(sanitized)
+        if parsed is None:
+            escaped = _escape_control_chars(candidate)
+            parsed = _try_load(escaped) or _raw_decode(escaped)
+        if parsed is None:
+            escaped_sanitized = _escape_control_chars(_sanitize_json(candidate))
+            parsed = _try_load(escaped_sanitized) or _raw_decode(escaped_sanitized)
+        if parsed is not None:
+            return parsed
+
+    first = response_text.find("{")
+    last = response_text.rfind("}")
+    if first != -1 and last != -1 and last > first:
+        candidate = response_text[first:last + 1]
+        parsed = _try_load(candidate) or _raw_decode(candidate)
+        if parsed is None:
+            sanitized = _sanitize_json(candidate)
+            parsed = _try_load(sanitized) or _raw_decode(sanitized)
+        if parsed is None:
+            escaped = _escape_control_chars(candidate)
+            parsed = _try_load(escaped) or _raw_decode(escaped)
+        if parsed is None:
+            escaped_sanitized = _escape_control_chars(_sanitize_json(candidate))
+            parsed = _try_load(escaped_sanitized) or _raw_decode(escaped_sanitized)
+        if parsed is not None:
+            return parsed
+
+    sanitized = _sanitize_json(_strip_invalid_controls(response_text))
+    parsed = _try_load(sanitized) or _raw_decode(sanitized)
+    if parsed is None:
+        escaped = _escape_control_chars(response_text)
+        parsed = _try_load(escaped) or _raw_decode(escaped)
+    if parsed is not None:
+        return parsed
 
     raise ValueError(f"Could not parse JSON from response: {response_text[:500]}...")

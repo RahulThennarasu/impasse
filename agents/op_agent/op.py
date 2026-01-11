@@ -4,6 +4,22 @@ from groq import Groq
 
 
 class OpponentAgent:
+    """
+    AI opponent that role-plays the counterparty in a negotiation.
+
+    This agent generates responses based on scenario context and maintains
+    its own transcript for context.
+
+    Usage:
+        opponent = OpponentAgent(opponent_config)
+
+        # Get opening message
+        opening = opponent.get_opening_message()
+
+        # During negotiation
+        response = opponent.get_response(user_message)
+    """
+
     transcript: List[Dict[str, str]]
     revealed_info: List[str]
     context: str
@@ -15,23 +31,6 @@ class OpponentAgent:
     info_asymmetries: str
     disposition: str
     personality: str
-    """
-    AI opponent that role-plays the counterparty in a negotiation.
-
-    This agent generates responses based on scenario context but does NOT
-    own the transcript. The NegotiationSession manages the canonical transcript.
-
-    Usage:
-        opponent = OpponentAgent(opponent_config)
-
-        # Get opening message
-        opening = opponent.get_opening_message()
-        session.add_opening_message(opening)
-
-        # During negotiation
-        response = opponent.get_response(session.get_llm_transcript())
-        session.add_opponent_message(response, latency_ms=320)
-    """
 
     def __init__(self, scenario_data: Dict):
         """
@@ -63,6 +62,10 @@ class OpponentAgent:
         self.info_asymmetries = scenario_data.get("information_asymmetries", "")
         self.disposition = scenario_data.get("disposition", "")
         self.personality = scenario_data.get("personality", "neutral")
+
+        # Initialize transcript
+        self.transcript = []
+        self.revealed_info = []
 
         # Build system prompt
         self.system_prompt = self._build_system_prompt()
@@ -143,8 +146,6 @@ This is the very first thing you say when the other party walks in or the meetin
 - You may hint at the agenda or your initial position, but don't dive into specifics yet
 - Keep it natural and brief (1-2 sentences)
 
-            Remember: This is spoken dialogue. Be warm, professional, or direct based on your character.
-        """
 Remember: This is spoken dialogue. Be warm, professional, or direct based on your character."""
 
         response = self.client.chat.completions.create(
@@ -153,50 +154,46 @@ Remember: This is spoken dialogue. Be warm, professional, or direct based on you
                 {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": opening_prompt}
             ],
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": opening_prompt}
-            ],
             temperature=0.85,
             max_tokens=self.max_opening_tokens,
         )
 
-        return response.choices[0].message.content or ""
+        opening = response.choices[0].message.content or ""
+        # Add to transcript as assistant message
+        self.transcript.append({"role": "assistant", "content": opening})
+        return opening
 
-    def get_response(self, transcript: List[Dict]) -> str:
+    def get_response(self, user_message: str) -> str:
         """
-        Generates opponent's response to user's message
-        """
-        # Add user message to transcript
-        self.transcript.append({"role": "user", "content": user_message})
-
-        history = self.transcript[-self.max_history_messages:] if self.max_history_messages > 0 else []
-        messages = [{"role": "system", "content": self.system_prompt}]
-        messages.extend(history)
-
-        Generate opponent's response based on conversation history.
+        Generates opponent's response to user's message.
 
         Args:
-            transcript: List of messages in LLM format:
-                [{"role": "user"|"assistant", "content": "..."}]
+            user_message: The user's message text
 
         Returns:
             The opponent's response text
         """
+        # Add user message to transcript
+        self.transcript.append({"role": "user", "content": user_message})
+
+        # Use recent history for context (configurable)
+        history = self.transcript[-self.max_history_messages:] if self.max_history_messages > 0 else self.transcript
+
         # Build messages for LLM: system prompt + conversation history
-        messages = [{"role": "system", "content": self.system_prompt}] + transcript
+        messages = [{"role": "system", "content": self.system_prompt}]
+        messages.extend(history)
 
         response = self.client.chat.completions.create(
             model=self.model,
             messages=messages,
-            temperature=0.85,  # Slightly higher for more human-like variability
-            max_tokens=self.max_response_tokens,
             temperature=0.85,
-            max_tokens=200,
+            max_tokens=self.max_response_tokens,
         )
 
-        return response.choices[0].message.content or ""
+        opponent_response = response.choices[0].message.content or ""
+        # Add opponent response to transcript
+        self.transcript.append({"role": "assistant", "content": opponent_response})
+        return opponent_response
 
     def get_hidden_state(self) -> Dict:
         """

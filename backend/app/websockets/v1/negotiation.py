@@ -293,7 +293,7 @@ class NegotiationSession:
             })
 
     async def generate_and_stream_audio(self, text: str):
-        """Generate TTS audio and stream to frontend"""
+        """Generate TTS audio and stream to frontend using Cartesia"""
         try:
             if not self.cartesia_client:
                 logger.warning(f"Session {self.session_id}: TTS disabled - skipping audio generation")
@@ -304,28 +304,33 @@ class NegotiationSession:
                 "type": "audio_start"
             })
 
-            # Generate audio with Cartesia
-            voice_id = "a0e99841-438c-4a64-b679-ae501e7d6091"  # Professional voice
+            # Cartesia voice ID - professional male voice
+            voice_id = os.getenv("CARTESIA_VOICE_ID", "a0e99841-438c-4a64-b679-ae501e7d6091")
+
+            # Output format for raw PCM audio
             output_format = {
                 "container": "raw",
                 "encoding": "pcm_f32le",
                 "sample_rate": 44100,
             }
 
-            # Stream audio chunks
+            # Stream audio chunks using SSE (Server-Sent Events)
+            # The new Cartesia SDK returns chunks with .data attribute
             for chunk in self.cartesia_client.tts.sse(
-                model_id="sonic-english",
+                model_id="sonic-2024-10-01",
                 transcript=text,
-                voice_id=voice_id,
-                stream=True,
+                voice={"mode": "id", "id": voice_id},
+                language="en",
                 output_format=output_format,
             ):
-                if chunk and "audio" in chunk:
-                    # Encode audio as base64 and send
-                    audio_base64 = base64.b64encode(chunk["audio"]).decode()
+                # New SDK returns chunk objects with .data attribute containing bytes
+                if chunk and hasattr(chunk, 'data') and chunk.data:
+                    audio_base64 = base64.b64encode(chunk.data).decode()
                     await self.websocket.send_json({
                         "type": "audio_chunk",
-                        "data": audio_base64
+                        "data": audio_base64,
+                        "sample_rate": 44100,
+                        "encoding": "pcm_f32le"
                     })
 
             # Notify frontend that audio is complete
@@ -333,8 +338,10 @@ class NegotiationSession:
                 "type": "audio_end"
             })
 
+            logger.info(f"Session {self.session_id}: TTS audio stream completed")
+
         except Exception as e:
-            logger.error(f"Session {self.session_id}: TTS error: {e}")
+            logger.error(f"Session {self.session_id}: TTS error: {e}", exc_info=True)
             await self.websocket.send_json({
                 "type": "error",
                 "message": "Failed to generate audio response"

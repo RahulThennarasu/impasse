@@ -132,9 +132,7 @@ async def confirm_upload(request: UploadConfirmRequest):
             Key=request.video_key,
         )
 
-        storage_url = (
-            f"https://{settings.S3_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/{request.video_key}"
-        )
+        # Generate presigned URL for viewing the video
         presigned_url = s3_client.generate_presigned_url(
             "get_object",
             Params={
@@ -144,27 +142,29 @@ async def confirm_upload(request: UploadConfirmRequest):
             ExpiresIn=settings.S3_PRESIGNED_URL_EXPIRATION,
         )
 
-        # Store video metadata in Supabase with public flag
+        # Store video metadata in Supabase with public flag and presigned URL
+        # Note: We store presigned URL for immediate use. For long-term access,
+        # use the /download-url endpoint to regenerate fresh presigned URLs.
         supabase = get_supabase_client()
         if supabase:
             try:
-                # Check if record already exists
+                # Check if record already exists in videos table
                 existing = supabase.table("videos").select("*").eq("uuid", request.session_id).execute()
 
+                video_data = {
+                    "link": presigned_url,
+                    "public": request.is_public,
+                    "video_key": request.video_key  # Store key for regenerating presigned URLs
+                }
+
                 if existing.data and len(existing.data) > 0:
-                    # Update existing record
-                    supabase.table("videos").update({
-                        "link": storage_url,
-                        "public": request.is_public
-                    }).eq("uuid", request.session_id).execute()
+                    # Update existing record with presigned URL
+                    supabase.table("videos").update(video_data).eq("uuid", request.session_id).execute()
                     logger.info(f"Updated video record for session {request.session_id} (public={request.is_public})")
                 else:
-                    # Insert new record
-                    supabase.table("videos").insert({
-                        "uuid": request.session_id,
-                        "link": storage_url,
-                        "public": request.is_public
-                    }).execute()
+                    # Insert new record with presigned URL
+                    video_data["uuid"] = request.session_id
+                    supabase.table("videos").insert(video_data).execute()
                     logger.info(f"Created video record for session {request.session_id} (public={request.is_public})")
             except Exception as db_error:
                 logger.warning(f"Failed to store video metadata in database: {db_error}")

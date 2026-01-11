@@ -24,9 +24,65 @@ logger = logging.getLogger(__name__)
 postmortem_router = APIRouter()
 
 # In-memory store for session data and analysis results
-# In production, this should be replaced with a database (e.g., Supabase)
+# Analysis is also persisted to Supabase when available
 _session_store: Dict[str, Dict] = {}
 _analysis_store: Dict[str, Dict] = {}
+
+
+def get_supabase_client():
+    """Initialize Supabase client for post-mortem storage."""
+    from app.core.config import settings
+    if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
+        return None
+    try:
+        from supabase import create_client
+        return create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+    except Exception as e:
+        logger.warning(f"Supabase client unavailable: {e}")
+        return None
+
+
+def persist_postmortem_to_db(session_id: str, analysis_data: Dict, video_url: Optional[str] = None) -> bool:
+    """
+    Persist post-mortem analysis to Supabase recordings table.
+
+    Args:
+        session_id: The negotiation session ID
+        analysis_data: The frontend-formatted analysis result
+        video_url: Optional presigned URL for the video
+
+    Returns:
+        True if persistence succeeded, False otherwise
+    """
+    supabase = get_supabase_client()
+    if not supabase:
+        logger.warning("Supabase not configured, skipping DB persistence")
+        return False
+
+    try:
+        # Check if record exists
+        existing = supabase.table("recordings").select("*").eq("id", session_id).execute()
+
+        record_data = {
+            "analysis": analysis_data,
+        }
+        if video_url:
+            record_data["link"] = video_url
+
+        if existing.data and len(existing.data) > 0:
+            # Update existing record
+            supabase.table("recordings").update(record_data).eq("id", session_id).execute()
+            logger.info(f"Updated post-mortem in DB for session {session_id}")
+        else:
+            # Insert new record
+            record_data["id"] = session_id
+            supabase.table("recordings").insert(record_data).execute()
+            logger.info(f"Inserted post-mortem in DB for session {session_id}")
+
+        return True
+    except Exception as e:
+        logger.error(f"Failed to persist post-mortem to DB: {e}")
+        return False
 
 
 class SessionData(BaseModel):
@@ -37,6 +93,7 @@ class SessionData(BaseModel):
     user_briefing: Optional[Dict[str, Any]] = None
     hidden_state: Optional[Dict[str, Any]] = None
     final_advice: Optional[str] = None
+    video_url: Optional[str] = None
 
 
 class PostMortemRequest(BaseModel):
@@ -319,13 +376,17 @@ async def request_post_mortem(request: PostMortemRequest):
             session_data.get("final_advice")
         )
 
-        # Store the analysis
+        # Store the analysis in memory
         _analysis_store[session_id] = {
             "raw_analysis": analysis,
             "frontend_result": frontend_result,
             "summary_text": agent.get_summary(analysis),
             "opponent_reveal": agent.get_opponent_reveal(),
         }
+
+        # Persist to database
+        video_url = session_data.get("video_url")
+        persist_postmortem_to_db(session_id, frontend_result, video_url)
 
         logger.info(f"Post-mortem analysis complete for {session_id}")
         return {"status": "complete", "session_id": session_id}
@@ -398,5 +459,32 @@ async def store_session(session_id: str, data: SessionData):
     This endpoint is called when a negotiation ends to persist
     the session data needed for post-mortem analysis.
     """
-    store_session_data(session_id, data.dict())
+    store_session_data(session_id, data.model_dump())
     return {"status": "stored", "session_id": session_id}
+
+
+class VideoUrlUpdate(BaseModel):
+    """Request to update video URL for a session."""
+    video_url: str
+
+
+@postmortem_router.post("/post_mortem/{session_id}/video")
+async def update_session_video_url(session_id: str, data: VideoUrlUpdate):
+    """
+    Associate a video URL with a post-mortem session.
+
+    Called after video upload completes to link the video to the analysis.
+    """
+    # Update in-memory store
+    if session_id in _session_store:
+        _session_store[session_id]["video_url"] = data.video_url
+
+    # Update in database if analysis already exists
+    if session_id in _analysis_store:
+        persist_postmortem_to_db(
+            session_id,
+            _analysis_store[session_id]["frontend_result"],
+            data.video_url
+        )
+
+    return {"status": "updated", "session_id": session_id}

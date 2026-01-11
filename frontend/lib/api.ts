@@ -131,6 +131,26 @@ export async function fetchPostMortem(sessionId: string) {
   return (await response.json()) as PostMortemResult;
 }
 
+export async function updatePostMortemVideoUrl(
+  sessionId: string,
+  videoUrl: string
+): Promise<{ status: string; session_id: string }> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/post_mortem/${sessionId}/video`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ video_url: videoUrl }),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to update video URL: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
 const normalizeAnalytics = (analysis: AnalyticsResponse["analysis"]): PostMortemResult => {
   const metricsRaw = Array.isArray(analysis.metrics) ? analysis.metrics : [];
   const keyMomentsRaw = Array.isArray(analysis.keyMoments)
@@ -271,7 +291,7 @@ export async function confirmVideoUpload(
 }
 
 /**
- * Full upload flow: get presigned URL, upload to S3, confirm upload.
+ * Full upload flow: get presigned URL, upload to S3, confirm upload, and link to post-mortem.
  */
 export async function uploadNegotiationVideo(
   sessionId: string,
@@ -290,6 +310,14 @@ export async function uploadNegotiationVideo(
 
   // Step 3: Confirm upload with public flag
   const { video_url } = await confirmVideoUpload(sessionId, video_key, isPublic);
+
+  // Step 4: Link video URL to post-mortem analysis
+  try {
+    await updatePostMortemVideoUrl(sessionId, video_url);
+  } catch (error) {
+    // Log but don't fail the upload if post-mortem update fails
+    console.warn("Failed to link video to post-mortem:", error);
+  }
 
   return video_url;
 }

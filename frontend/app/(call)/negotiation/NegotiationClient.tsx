@@ -32,12 +32,6 @@ const initialCoachSuggestions: CoachTip[] = [
   },
 ];
 
-const keyPoints = [
-  { label: "Rapport Score", value: "8.5/10", trend: "up" as const },
-  { label: "Speaking Pace", value: "142 wpm", trend: "neutral" as const },
-  { label: "Confidence", value: "High", trend: "up" as const },
-];
-
 const base64ToArrayBuffer = (base64: string) => {
   const binary = atob(base64);
   const len = binary.length;
@@ -368,6 +362,7 @@ export function NegotiationClient() {
       ws.send(
         JSON.stringify({ type: "initialize", scenario: scenarioPayload })
       );
+      setSocketReady(true);
     };
 
     ws.onmessage = (event) => {
@@ -375,7 +370,6 @@ export function NegotiationClient() {
         const data = JSON.parse(event.data);
         if (data.type === "ready") {
           setAgentStatus("idle");
-          setSocketReady(true);
         }
         if (data.type === "error") {
           setMediaError(data.message ?? "Server error");
@@ -484,6 +478,11 @@ export function NegotiationClient() {
 
     ws.onclose = () => {
       setAgentStatus("disconnected");
+      setSocketReady(false);
+    };
+
+    ws.onerror = () => {
+      setMediaError("WebSocket connection failed.");
       setSocketReady(false);
     };
 
@@ -681,10 +680,8 @@ export function NegotiationClient() {
       <WorkspaceSidebar
         isSidebarOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
-        keyPoints={keyPoints}
         coachSuggestions={coachSuggestions}
         notes={notes}
-        onNotesChange={setNotes}
       />
 
       <main className="relative flex h-full flex-1 flex-col">
@@ -727,12 +724,9 @@ export function NegotiationClient() {
               {isVideoOff ? "Camera paused" : "Connecting camera..."}
             </div>
           ) : null}
-          <div className="absolute left-8 top-6 flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs font-semibold text-white backdrop-blur">
+          <div className="absolute right-8 top-6 flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs font-semibold text-white backdrop-blur">
             <span className="h-2 w-2 rounded-full bg-olive-soft shadow-olive-glow" />
             LIVE
-          </div>
-          <div className="absolute right-8 top-6 rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs font-semibold text-white backdrop-blur">
-            {formatTime(callRemaining)}
           </div>
           <div className="absolute right-8 top-16 rounded-full border border-white/10 bg-black/40 px-3 py-2 text-[10px] font-semibold text-white/70 backdrop-blur">
             <Button

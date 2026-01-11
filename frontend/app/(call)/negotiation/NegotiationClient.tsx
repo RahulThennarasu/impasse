@@ -48,6 +48,15 @@ const base64ToArrayBuffer = (base64: string) => {
   return bytes.buffer;
 };
 
+const pcm16ToFloat32 = (buffer: ArrayBuffer): Float32Array => {
+  const int16 = new Int16Array(buffer);
+  const float32 = new Float32Array(int16.length);
+  for (let i = 0; i < int16.length; i += 1) {
+    float32[i] = int16[i] / 32768;
+  }
+  return float32;
+};
+
 const downsampleBuffer = (
   input: Float32Array,
   inputSampleRate: number,
@@ -379,7 +388,7 @@ export function NegotiationClient() {
         }
         if (data.type === "audio_chunk" && data.data) {
           const buffer = base64ToArrayBuffer(data.data);
-          const pcm = new Float32Array(buffer);
+          const pcm = pcm16ToFloat32(buffer);
           let energy = 0;
           let count = 0;
           for (let i = 0; i < pcm.length; i += 8) {

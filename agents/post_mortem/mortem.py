@@ -159,19 +159,50 @@ Return ONLY valid JSON, no other text."""
 
         model = os.getenv("GEMINI_POST_MORTEM_MODEL", "gemini-2.5-flash-lite")
         max_tokens = int(os.getenv("GEMINI_POST_MORTEM_TOKENS", "4000"))
+        result = self._generate_analysis(
+            system_prompt=system_prompt,
+            analysis_prompt=analysis_prompt,
+            model=model,
+            max_tokens=max_tokens,
+            compact=False,
+        )
+        parsed = self._parse_json(result)
+        if parsed.get("parse_error"):
+            retry_tokens = int(os.getenv("GEMINI_POST_MORTEM_TOKENS_RETRY", "4000"))
+            retry_prompt = (
+                analysis_prompt
+                + "\n\nCRITICAL: Keep each list to 3 items max and keep text concise. "
+                "Return only valid JSON. No markdown."
+            )
+            retry_result = self._generate_analysis(
+                system_prompt=system_prompt,
+                analysis_prompt=retry_prompt,
+                model=model,
+                max_tokens=retry_tokens,
+                compact=True,
+            )
+            return self._parse_json(retry_result)
+        return parsed
+
+    def _generate_analysis(
+        self,
+        system_prompt: str,
+        analysis_prompt: str,
+        model: str,
+        max_tokens: int,
+        compact: bool,
+    ) -> str:
         response = self.client.models.generate_content(
             model=model,
             contents=analysis_prompt,
             config=genai.types.GenerateContentConfig(
                 system_instruction=system_prompt,
-                temperature=0.4,
+                temperature=0.4 if not compact else 0.2,
                 max_output_tokens=max_tokens,
                 response_mime_type="application/json",
             ),
         )
-
-        result = self._extract_response_text(response)
-        return self._parse_json(result)
+        return self._extract_response_text(response)
 
     def get_summary(self, analysis: Dict) -> str:
         """

@@ -73,8 +73,13 @@ class NegotiationSession:
 
         # Initialize agents
         try:
-            self.opponent = OpponentAgent(scenario_data["opponent"])
-            logger.info(f"Session {session_id}: OpponentAgent initialized")
+            opponent_config = scenario_data["opponent"]
+            # Log key scenario fields to verify data is being passed
+            logger.info(f"Session {session_id}: Opponent config keys: {list(opponent_config.keys())}")
+            if opponent_config.get("shared_context"):
+                logger.info(f"Session {session_id}: Shared context present with keys: {list(opponent_config['shared_context'].keys())}")
+            self.opponent = OpponentAgent(opponent_config)
+            logger.info(f"Session {session_id}: OpponentAgent initialized with name: {self.opponent.name}")
         except Exception as e:
             logger.error(f"Session {session_id}: Failed to initialize OpponentAgent: {e}")
             raise

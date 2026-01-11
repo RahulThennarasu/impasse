@@ -48,6 +48,8 @@ class OpponentAgent:
                 - information_asymmetries: What they know that user doesn't
                 - disposition: Their likely tactics and behavior
                 - personality: Communication style (friendly, aggressive, etc.)
+                - shared_context: The shared scenario context both parties know
+                - scenario_title: Title of the negotiation scenario
         """
         self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         self.model = os.getenv("GROQ_OPPONENT_MODEL", "llama-3.1-8b-instant")
@@ -69,6 +71,12 @@ class OpponentAgent:
         self.role_description = scenario_data.get("role_description", "")
         self.negotiables = scenario_data.get("negotiables", [])
 
+        # Additional scenario context for answering questions
+        self.shared_context = scenario_data.get("shared_context", {})
+        self.scenario_title = scenario_data.get("scenario_title", "")
+        self.opening_position = scenario_data.get("opening_position", "")
+        self.success_criteria = scenario_data.get("success_criteria", {})
+
         # Initialize transcript
         self.transcript = []
         self.revealed_info = []
@@ -83,18 +91,48 @@ class OpponentAgent:
         constraints_str = ", ".join(self.constraints) if isinstance(self.constraints, list) else self.constraints
         negotiables_str = ", ".join(self.negotiables) if self.negotiables else "Not specified"
 
+        # Build shared context string if available
+        shared_context_str = ""
+        if self.shared_context:
+            situation = self.shared_context.get("situation", "")
+            relationship = self.shared_context.get("relationship_history", "")
+            setting = self.shared_context.get("setting", "")
+            stakes = self.shared_context.get("stakes", "")
+            shared_context_str = f"""
+=== SCENARIO BACKGROUND (WHAT BOTH PARTIES KNOW) ===
+Situation: {situation}
+Relationship History: {relationship}
+Setting: {setting}
+Stakes: {stakes}
+"""
+
+        # Build success criteria string if available
+        success_str = ""
+        if self.success_criteria:
+            good = self.success_criteria.get("good_outcome", "")
+            great = self.success_criteria.get("great_outcome", "")
+            if good or great:
+                success_str = f"""
+=== YOUR SUCCESS CRITERIA ===
+Good outcome for you: {good}
+Great outcome for you: {great}
+"""
+
         return f"""You are {self.name} in a realistic negotiation. You are a human with real pressures, motivations, and limits.
+
+YOU KNOW EVERYTHING ABOUT THIS SCENARIO. When asked about the negotiation, your role, the situation, numbers, terms, or any details—answer confidently and specifically using the information below. You are fully informed about your position, the context, and what's being negotiated.
 
 CRITICAL RULES:
 1. This is a VOICE conversation using text-to-speech. Your responses must sound natural when spoken aloud.
-2. DO NOT search the web, look up external information, or fetch any data. You are a human in a conversation—you don't have internet access during this meeting.
-3. Only use the information provided in this prompt. If you don't know something, say so naturally like a real person would ("I'd have to check on that" or "I'm not sure off the top of my head").
-4. NEVER output tables, markdown formatting, special characters, or structured data. Only speak in plain conversational sentences.
-5. Write exactly how a real person talks—casual, direct, with natural speech patterns. Avoid anything scripted or AI-generated.
-6. NEGOTIATE IN YOUR OWN INTEREST. You want the best deal for YOUR side. Don't give away more than you have to. Push back. Counter-offer. Protect your budget/constraints.
-7. NEVER offer more than what they're asking for. If they ask for X, you counter with less than X or equal to X at most—never more.
-8. Start with your lowest reasonable offer and only increase if they push back convincingly.
-
+2. YOU HAVE FULL KNOWLEDGE of this negotiation scenario. When asked about specifics (numbers, terms, your position, the situation), answer directly and confidently using the details provided below.
+3. NEVER say "I don't know" or "I'd have to check" about things covered in this prompt. You know your role, your constraints, your goals, and the scenario details.
+4. For things NOT covered in this prompt (e.g., unrelated topics, future predictions), you can say you'd need to check.
+5. NEVER output tables, markdown formatting, special characters, or structured data. Only speak in plain conversational sentences.
+6. Write exactly how a real person talks—casual, direct, with natural speech patterns. Avoid anything scripted or AI-generated.
+7. NEGOTIATE IN YOUR OWN INTEREST. You want the best deal for YOUR side. Don't give away more than you have to. Push back. Counter-offer. Protect your budget/constraints.
+8. NEVER offer more than what they're asking for. If they ask for X, you counter with less than X or equal to X at most—never more.
+9. Start with your lowest reasonable offer and only increase if they push back convincingly.
+{shared_context_str}
 === YOUR SITUATION ===
 {self.context}
 
@@ -124,7 +162,7 @@ CRITICAL RULES:
 
 === YOUR TACTICAL APPROACH ===
 {self.disposition}
-
+{success_str}
 === NEGOTIATION PHASES ===
 
 OPENING (first few exchanges):

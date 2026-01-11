@@ -290,6 +290,12 @@ def _build_opponent_config(shared_context: Dict, opponent_briefing: Dict) -> Dic
         # Also include raw data for flexibility
         "negotiables": opponent_briefing.get("negotiables", []),
         "role_description": opponent_briefing.get("role_description", ""),
+        # Include shared context so opponent knows scenario details
+        "shared_context": shared_context,
+        "scenario_title": shared_context.get("situation", "")[:100] if shared_context.get("situation") else "",
+        # Include success criteria and opening position for better scenario awareness
+        "success_criteria": opponent_briefing.get("success_criteria", {}),
+        "opening_position": concession.get("initial_stance", ""),
     }
 
 # transforms scenario data into flat format for CoachAgent

@@ -16,6 +16,7 @@ import asyncio
 import os
 import base64
 import sys
+import httpx
 from typing import Dict, Optional
 
 # Add agents to path
@@ -80,12 +81,18 @@ class NegotiationSession:
         try:
             if Cartesia:
                 self.cartesia_client = Cartesia(api_key=os.getenv("CARTESIA_API_KEY"))
+                self.cartesia_available = True
             else:
                 self.cartesia_client = None
-                logger.warning("Cartesia not installed - TTS will be disabled")
+                self.cartesia_available = False
+                if os.getenv("CARTESIA_API_KEY"):
+                    logger.warning("Cartesia SDK unavailable - falling back to HTTP TTS")
+                else:
+                    logger.warning("Cartesia API key missing - TTS will be disabled")
         except Exception as e:
             logger.error(f"Failed to initialize Cartesia: {e}")
             self.cartesia_client = None
+            self.cartesia_available = False
             logger.warning("Cartesia TTS will be disabled")
 
         # Session state
@@ -180,6 +187,23 @@ class NegotiationSession:
                             self.current_transcription = transcript
                             self.pending_transcript = transcript
                             self._schedule_transcript_flush()
+            elif hasattr(result, "transcript"):
+                transcript = result.transcript
+                if transcript:
+                    logger.info(f"Session {self.session_id}: Transcription: '{transcript}' (alt)")
+                    if self.websocket and self.loop:
+                        asyncio.run_coroutine_threadsafe(
+                            self.websocket.send_json({
+                                "type": "transcription",
+                                "text": transcript,
+                                "is_final": True
+                            }),
+                            self.loop
+                        )
+                    if transcript.strip():
+                        self.current_transcription = transcript
+                        self.pending_transcript = transcript
+                        self._schedule_transcript_flush()
 
         except Exception as e:
             logger.error(f"Session {self.session_id}: Error processing transcript: {e}", exc_info=True)
@@ -265,7 +289,7 @@ class NegotiationSession:
     async def generate_and_stream_audio(self, text: str):
         """Generate TTS audio and stream to frontend using Cartesia"""
         try:
-            if not self.cartesia_client:
+            if not self.cartesia_client and not os.getenv("CARTESIA_API_KEY"):
                 logger.warning(f"Session {self.session_id}: TTS disabled - skipping audio generation")
                 return
 
@@ -276,6 +300,7 @@ class NegotiationSession:
 
             # Cartesia voice ID - professional male voice
             voice_id = os.getenv("CARTESIA_VOICE_ID", "a0e99841-438c-4a64-b679-ae501e7d6091")
+            tts_model = os.getenv("CARTESIA_MODEL_ID", "sonic-3")
 
             # Output format for raw PCM audio (16-bit signed, little-endian)
             output_format = {
@@ -284,16 +309,26 @@ class NegotiationSession:
                 "sample_rate": 44100,
             }
 
-            # Stream audio chunks using SSE
-            # Cartesia SDK returns dict with 'audio' key containing bytes
-            for chunk in self.cartesia_client.tts.sse(
-                model_id="sonic-3",
-                transcript=text,
-                voice_id=voice_id,
-                output_format=output_format,
-            ):
-                audio_bytes = chunk.get("audio") if isinstance(chunk, dict) else chunk
-                if audio_bytes:
+            if self.cartesia_client:
+                # Stream audio chunks using SSE via SDK
+                for chunk in self.cartesia_client.tts.sse(
+                    model_id=tts_model,
+                    transcript=text,
+                    voice_id=voice_id,
+                    output_format=output_format,
+                    stream=True,
+                ):
+                    audio_bytes = chunk.get("audio") if isinstance(chunk, dict) else chunk
+                    if audio_bytes:
+                        audio_base64 = base64.b64encode(audio_bytes).decode()
+                        await self.websocket.send_json({
+                            "type": "audio_chunk",
+                            "data": audio_base64,
+                            "sample_rate": 44100,
+                            "encoding": "pcm_s16le"
+                        })
+            else:
+                async for audio_bytes in self._cartesia_sse_stream(text, tts_model, voice_id, output_format):
                     audio_base64 = base64.b64encode(audio_bytes).decode()
                     await self.websocket.send_json({
                         "type": "audio_chunk",
@@ -315,6 +350,55 @@ class NegotiationSession:
                 "type": "error",
                 "message": "Failed to generate audio response"
             })
+
+    async def _cartesia_sse_stream(self, text: str, model_id: str, voice_id: str, output_format: dict):
+        api_key = os.getenv("CARTESIA_API_KEY")
+        if not api_key:
+            return
+        base_url = os.getenv("CARTESIA_BASE_URL", "https://api.cartesia.ai")
+        if not base_url.startswith("http"):
+            base_url = f"https://{base_url}"
+        version = os.getenv("CARTESIA_VERSION", "2024-06-10")
+
+        headers = {
+            "X-API-Key": api_key,
+            "Cartesia-Version": version,
+            "Content-Type": "application/json",
+        }
+        request_body = {
+            "model_id": model_id,
+            "transcript": text,
+            "voice": {"mode": "id", "id": voice_id},
+            "output_format": {
+                "container": output_format["container"],
+                "encoding": output_format["encoding"],
+                "sample_rate": output_format["sample_rate"],
+            },
+        }
+
+        buffer = ""
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=30.0)) as client:
+            async with client.stream("POST", f"{base_url}/tts/sse", headers=headers, json=request_body) as response:
+                response.raise_for_status()
+                async for chunk_bytes in response.aiter_bytes():
+                    buffer += chunk_bytes.decode("utf-8")
+                    while "{" in buffer and "}" in buffer:
+                        start_index = buffer.find("{")
+                        end_index = buffer.find("}", start_index)
+                        if start_index == -1 or end_index == -1:
+                            break
+                        try:
+                            chunk_json = json.loads(buffer[start_index:end_index + 1])
+                        except json.JSONDecodeError:
+                            break
+                        buffer = buffer[end_index + 1:]
+                        if "error" in chunk_json:
+                            raise RuntimeError(f"Cartesia error: {chunk_json['error']}")
+                        if chunk_json.get("done"):
+                            return
+                        audio_b64 = chunk_json.get("data")
+                        if audio_b64:
+                            yield base64.b64decode(audio_b64)
 
     async def send_audio_to_deepgram(self, audio_data: bytes):
         """Send audio chunk to Deepgram for transcription"""

@@ -372,11 +372,40 @@ export function NegotiationClient() {
             // Update motion phase
             orbMotionPhaseRef.current += 0.016 * (0.001 + orbAudioLevelRef.current * 0.002) * 60;
 
-            // Clear and draw video (mirrored)
+            // Clear canvas with black background (for letterboxing)
+            context.fillStyle = "#000";
+            context.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw video (mirrored) maintaining aspect ratio
+            const videoWidth = video.videoWidth || canvas.width;
+            const videoHeight = video.videoHeight || canvas.height;
+            const videoAspect = videoWidth / videoHeight;
+            const canvasAspect = canvas.width / canvas.height;
+
+            let drawWidth: number;
+            let drawHeight: number;
+            let drawX: number;
+            let drawY: number;
+
+            if (videoAspect > canvasAspect) {
+              // Video is wider - fit to width, letterbox top/bottom
+              drawWidth = canvas.width;
+              drawHeight = canvas.width / videoAspect;
+              drawX = 0;
+              drawY = (canvas.height - drawHeight) / 2;
+            } else {
+              // Video is taller - fit to height, pillarbox left/right
+              drawHeight = canvas.height;
+              drawWidth = canvas.height * videoAspect;
+              drawX = (canvas.width - drawWidth) / 2;
+              drawY = 0;
+            }
+
             context.save();
             context.translate(canvas.width, 0);
             context.scale(-1, 1);
-            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            // Adjust x coordinate for mirrored context
+            context.drawImage(video, canvas.width - drawX - drawWidth, drawY, drawWidth, drawHeight);
             context.restore();
 
             // Draw opponent orb overlay

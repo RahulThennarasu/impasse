@@ -11,7 +11,6 @@ Flow:
 
 import uuid
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
-from starlette.websockets import WebSocketState
 import logging
 import json
 import asyncio
@@ -27,6 +26,7 @@ from typing import Dict, Optional, List
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../../.."))
 
 from pydantic import BaseModel
+from supabase import create_client, Client
 from app.core.config import settings
 from agents.scenario_agent.scenario import generate_scenario
 from deepgram import DeepgramClient
@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 negotiation_router = APIRouter()
 
 
-def get_supabase_client():
+def get_supabase_client() -> Client:
     """Initialize and return a Supabase client"""
     if not settings.SUPABASE_URL or not settings.SUPABASE_API_KEY:
         raise HTTPException(
@@ -145,7 +145,6 @@ class NegotiationSession:
                 "i'll go with,i would take,i can take"
             ).split(",") if p.strip()
         ]
-        self.closed = False
 
         logger.info(f"Created negotiation session {session_id}")
 
@@ -277,7 +276,6 @@ class NegotiationSession:
                     "transcript": self.opponent.transcript,
                     "auto_ended": True
                 })
-                self.closed = True
                 await self.websocket.close()
                 return
 
@@ -342,8 +340,7 @@ class NegotiationSession:
     async def generate_and_stream_audio(self, text: str):
         """Generate TTS audio and stream to frontend using Cartesia"""
         try:
-            api_key = os.getenv("CARTESIA_API_KEY")
-            if not self.cartesia_client and not api_key:
+            if not self.cartesia_client and not os.getenv("CARTESIA_API_KEY"):
                 logger.warning(f"Session {self.session_id}: TTS disabled - skipping audio generation")
                 return
 
@@ -355,8 +352,8 @@ class NegotiationSession:
                 "type": "audio_start"
             })
 
-            # Cartesia voice ID - Ronald (Thinker)
-            voice_id = os.getenv("CARTESIA_VOICE_ID", "5ee9feff-1265-424a-9d7f-8e4d431a12c7")
+            # Cartesia voice ID - professional male voice
+            voice_id = os.getenv("CARTESIA_VOICE_ID", "a0e99841-438c-4a64-b679-ae501e7d6091")
             tts_model = os.getenv("CARTESIA_MODEL_ID", "sonic-3")
 
             # Output format for raw PCM audio (16-bit signed, little-endian)
@@ -366,34 +363,21 @@ class NegotiationSession:
                 "sample_rate": 44100,
             }
 
-            if self.cartesia_client:
-                # Stream audio chunks using SSE via SDK
-                for chunk in self.cartesia_client.tts.sse(
-                    model_id=tts_model,
-                    transcript=text,
-                    voice_id=voice_id,
-                    output_format=output_format,
-                    stream=True,
-                ):
-                    # Check if barge-in occurred
-                    if self.is_tts_cancelled:
-                        logger.info(f"Session {self.session_id}: TTS cancelled due to barge-in")
-                        break
+            # Stream audio chunks using SSE
+            # Cartesia SDK returns dict with 'audio' key containing bytes
+            for chunk in self.cartesia_client.tts.sse(
+                model_id="sonic-3",
+                transcript=text,
+                voice_id=voice_id,
+                output_format=output_format,
+            ):
+                # Check if barge-in occurred
+                if self.is_tts_cancelled:
+                    logger.info(f"Session {self.session_id}: TTS cancelled due to barge-in")
+                    break
 
-                    audio_bytes = chunk.get("audio") if isinstance(chunk, dict) else chunk
-                    if audio_bytes:
-                        audio_base64 = base64.b64encode(audio_bytes).decode()
-                        await self.websocket.send_json({
-                            "type": "audio_chunk",
-                            "data": audio_base64,
-                            "sample_rate": 44100,
-                            "encoding": "pcm_s16le"
-                        })
-            else:
-                async for audio_bytes in self._cartesia_sse_stream(text, tts_model, voice_id, output_format):
-                    if self.is_tts_cancelled:
-                        logger.info(f"Session {self.session_id}: TTS cancelled due to barge-in")
-                        break
+                audio_bytes = chunk.get("audio") if isinstance(chunk, dict) else chunk
+                if audio_bytes:
                     audio_base64 = base64.b64encode(audio_bytes).decode()
                     await self.websocket.send_json({
                         "type": "audio_chunk",
@@ -486,30 +470,6 @@ class NegotiationSession:
             return False
         return any(phrase in lowered for phrase in self.acceptance_phrases)
 
-    def _is_deal_closed(self, opponent_response: str) -> bool:
-        """Check if opponent's response indicates deal has been closed."""
-        lowered = opponent_response.lower()
-        # Phrases indicating opponent is closing the deal
-        closing_phrases = [
-            "we have a deal",
-            "we've got a deal",
-            "we got a deal",
-            "deal is done",
-            "it's a deal",
-            "that's a deal",
-            "shake on it",
-            "i'll get the paperwork",
-            "i'll draw up the",
-            "i'll send over the",
-            "pleasure doing business",
-            "look forward to working",
-            "welcome aboard",
-            "congratulations",
-            "let's finalize",
-            "we're all set",
-        ]
-        return any(phrase in lowered for phrase in closing_phrases)
-
     def _schedule_transcript_flush(self):
         if not self.loop:
             return
@@ -564,7 +524,6 @@ class NegotiationSession:
             self.dg_connection_ctx = None
         self.dg_connection = None
         self.dg_connected = False
-        self.closed = True
         logger.info(f"Session {self.session_id}: Cleaned up")
 
 
@@ -629,14 +588,7 @@ async def websocket_negotiation(websocket: WebSocket, session_id: str):
 
         # Main message loop
         while True:
-            if session.closed or websocket.client_state != WebSocketState.CONNECTED:
-                break
-            try:
-                data = await websocket.receive()
-            except RuntimeError as e:
-                if "disconnect message has been received" in str(e):
-                    break
-                raise
+            data = await websocket.receive()
 
             if "bytes" in data:
                 # Audio chunk from user
@@ -838,4 +790,38 @@ async def get_all_video_links():
         raise HTTPException(
             status_code=500,
             detail="Failed to retrieve video links"
+        )
+
+
+@negotiation_router.get("/videos/{session_id}/analytics")
+async def get_video_analytics(session_id: str):
+    """
+    Retrieve analytics data for a specific video session.
+    
+    Returns the analytics JSONB data associated with the given session ID.
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        # Query the videos table for the specific session
+        response = supabase.table("videos").select("analytics").eq("uuid", session_id).execute()
+        
+        if not response.data or len(response.data) == 0:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No video session found with ID: {session_id}"
+            )
+        
+        analytics = response.data[0].get("analytics", {})
+        logger.info(f"Retrieved analytics for session: {session_id}")
+        
+        return {"session_id": session_id, "analytics": analytics}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to retrieve analytics for session {session_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve analytics data"
         )

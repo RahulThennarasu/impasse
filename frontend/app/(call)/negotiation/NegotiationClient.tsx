@@ -12,11 +12,18 @@ import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import {
   getWsBaseUrl,
   requestPostMortem,
-  uploadNegotiationVideo,
+  startMultipartUpload,
+  getPartUploadUrl,
+  uploadPart,
+  completeMultipartUpload,
   type CoachTip,
+  type CompletedPart,
 } from "@/lib/api";
 
 const initialCoachSuggestions: CoachTip[] = [];
+
+// S3 requires minimum 5MB per part (except last part)
+const MIN_PART_SIZE = 5 * 1024 * 1024;
 
 const base64ToArrayBuffer = (base64: string) => {
   const binary = atob(base64);
@@ -118,6 +125,13 @@ export function NegotiationClient() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
 
+  // Multipart upload refs for streaming
+  const uploadIdRef = useRef<string | null>(null);
+  const uploadedPartsRef = useRef<CompletedPart[]>([]);
+  const partNumberRef = useRef(1);
+  const pendingChunksRef = useRef<Blob[]>([]);
+  const uploadingRef = useRef(false);
+
   const [isMuted, setIsMuted] = useState(false);
   const [isSkipConfirmOpen, setIsSkipConfirmOpen] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
@@ -166,7 +180,7 @@ export function NegotiationClient() {
           videoRef.current.srcObject = mediaStream;
         }
 
-        // Start recording for potential upload
+        // Start recording with streaming upload to S3
         try {
           const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
             ? "video/webm;codecs=vp9,opus"
@@ -174,38 +188,116 @@ export function NegotiationClient() {
           const mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
           mediaRecorderRef.current = mediaRecorder;
           recordedChunksRef.current = [];
+          pendingChunksRef.current = [];
+          uploadedPartsRef.current = [];
+          partNumberRef.current = 1;
+          uploadingRef.current = false;
+
+          // Get sessionId from URL params
+          const urlParams = new URLSearchParams(window.location.search);
+          const currentSessionId = urlParams.get("sessionId");
+
+          if (currentSessionId) {
+            // Start multipart upload immediately
+            startMultipartUpload(currentSessionId, mimeType)
+              .then(({ upload_id }) => {
+                uploadIdRef.current = upload_id;
+                console.log(`Started multipart upload: ${upload_id}`);
+              })
+              .catch((err) => {
+                console.error("Failed to start multipart upload:", err);
+              });
+          }
+
+          // Helper function to upload accumulated chunks as a part
+          const uploadAccumulatedChunks = async () => {
+            if (uploadingRef.current || !uploadIdRef.current || !currentSessionId) {
+              return;
+            }
+
+            const totalSize = pendingChunksRef.current.reduce((sum, chunk) => sum + chunk.size, 0);
+            if (totalSize < MIN_PART_SIZE) {
+              return; // Wait for more data
+            }
+
+            uploadingRef.current = true;
+            const chunksToUpload = [...pendingChunksRef.current];
+            pendingChunksRef.current = [];
+            const partBlob = new Blob(chunksToUpload, { type: mimeType });
+            const partNumber = partNumberRef.current;
+            partNumberRef.current += 1;
+
+            try {
+              const { upload_url } = await getPartUploadUrl(
+                currentSessionId,
+                uploadIdRef.current,
+                partNumber
+              );
+              const etag = await uploadPart(upload_url, partBlob);
+              uploadedPartsRef.current.push({ part_number: partNumber, etag });
+              console.log(`Uploaded part ${partNumber} (${(partBlob.size / 1024 / 1024).toFixed(2)}MB)`);
+            } catch (err) {
+              console.error(`Failed to upload part ${partNumber}:`, err);
+              // Put chunks back for retry
+              pendingChunksRef.current = [...chunksToUpload, ...pendingChunksRef.current];
+              partNumberRef.current = partNumber;
+            } finally {
+              uploadingRef.current = false;
+            }
+
+            // Check if there are more chunks to upload
+            const remainingSize = pendingChunksRef.current.reduce((sum, chunk) => sum + chunk.size, 0);
+            if (remainingSize >= MIN_PART_SIZE) {
+              void uploadAccumulatedChunks();
+            }
+          };
 
           mediaRecorder.ondataavailable = (event) => {
             if (event.data.size > 0) {
               recordedChunksRef.current.push(event.data);
+              pendingChunksRef.current.push(event.data);
+              // Try to upload if we have enough data
+              void uploadAccumulatedChunks();
             }
           };
 
           mediaRecorder.onstop = async () => {
-            if (recordedChunksRef.current.length === 0) {
-              console.warn("No recorded chunks available for upload");
+            if (!uploadIdRef.current || !currentSessionId) {
+              console.warn("No upload ID or session ID for completion");
               return;
             }
 
-            const videoBlob = new Blob(recordedChunksRef.current, {
-              type: mimeType,
-            });
+            // Upload any remaining chunks as the final part
+            if (pendingChunksRef.current.length > 0) {
+              const finalBlob = new Blob(pendingChunksRef.current, { type: mimeType });
+              const partNumber = partNumberRef.current;
 
-            // Get sessionId from URL params
-            const urlParams = new URLSearchParams(window.location.search);
-            const currentSessionId = urlParams.get("sessionId");
-
-            if (!currentSessionId) {
-              console.warn("No session ID available for video upload");
-              return;
+              try {
+                const { upload_url } = await getPartUploadUrl(
+                  currentSessionId,
+                  uploadIdRef.current,
+                  partNumber
+                );
+                const etag = await uploadPart(upload_url, finalBlob);
+                uploadedPartsRef.current.push({ part_number: partNumber, etag });
+                console.log(`Uploaded final part ${partNumber} (${(finalBlob.size / 1024 / 1024).toFixed(2)}MB)`);
+              } catch (err) {
+                console.error("Failed to upload final part:", err);
+              }
             }
 
+            // Complete the multipart upload (instant - just metadata)
             try {
-              console.log(`Uploading video for session ${currentSessionId}...`);
-              await uploadNegotiationVideo(currentSessionId, videoBlob, false);
-              console.log("Video uploaded successfully");
-            } catch (uploadError) {
-              console.error("Failed to upload video:", uploadError);
+              console.log("Completing multipart upload...");
+              await completeMultipartUpload(
+                currentSessionId,
+                uploadIdRef.current,
+                uploadedPartsRef.current,
+                false
+              );
+              console.log("Video upload completed successfully!");
+            } catch (err) {
+              console.error("Failed to complete multipart upload:", err);
             }
           };
 

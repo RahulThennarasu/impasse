@@ -52,6 +52,49 @@ class PresignedUrlResponse(BaseModel):
     expires_in: int
 
 
+# =============================================================================
+# Multipart Upload Models (for streaming uploads)
+# =============================================================================
+
+class StartMultipartRequest(BaseModel):
+    session_id: str
+    content_type: str = "video/webm"
+
+
+class StartMultipartResponse(BaseModel):
+    upload_id: str
+    video_key: str
+
+
+class GetPartUrlRequest(BaseModel):
+    session_id: str
+    upload_id: str
+    part_number: int
+
+
+class GetPartUrlResponse(BaseModel):
+    upload_url: str
+    part_number: int
+
+
+class CompletedPart(BaseModel):
+    part_number: int
+    etag: str
+
+
+class CompleteMultipartRequest(BaseModel):
+    session_id: str
+    upload_id: str
+    parts: list[CompletedPart]
+    is_public: bool = False
+
+
+class CompleteMultipartResponse(BaseModel):
+    success: bool
+    video_url: str
+    video_key: str
+
+
 class UploadConfirmRequest(BaseModel):
     session_id: str
     video_key: str
@@ -235,4 +278,167 @@ async def get_download_url(session_id: str, expires_in: Optional[int] = 3600):
         raise HTTPException(
             status_code=500,
             detail="Failed to generate download URL"
+        )
+
+
+# =============================================================================
+# Multipart Upload Endpoints (for streaming uploads during recording)
+# =============================================================================
+
+@videos_router.post("/multipart/start", response_model=StartMultipartResponse)
+async def start_multipart_upload(request: StartMultipartRequest):
+    """
+    Start a multipart upload for streaming video chunks.
+    Call this when recording begins.
+    """
+    s3_client = get_s3_client()
+    video_key = f"videos/{request.session_id}/recording.webm"
+
+    try:
+        response = s3_client.create_multipart_upload(
+            Bucket=settings.S3_BUCKET_NAME,
+            Key=video_key,
+            ContentType=request.content_type,
+        )
+
+        upload_id = response["UploadId"]
+        logger.info(f"Started multipart upload for session {request.session_id}: {upload_id}")
+
+        return StartMultipartResponse(
+            upload_id=upload_id,
+            video_key=video_key,
+        )
+
+    except ClientError as e:
+        logger.error(f"Failed to start multipart upload: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to start multipart upload"
+        )
+
+
+@videos_router.post("/multipart/part-url", response_model=GetPartUrlResponse)
+async def get_part_upload_url(request: GetPartUrlRequest):
+    """
+    Get a presigned URL for uploading a specific part.
+    Call this for each chunk during recording.
+    """
+    s3_client = get_s3_client()
+    video_key = f"videos/{request.session_id}/recording.webm"
+
+    try:
+        presigned_url = s3_client.generate_presigned_url(
+            "upload_part",
+            Params={
+                "Bucket": settings.S3_BUCKET_NAME,
+                "Key": video_key,
+                "UploadId": request.upload_id,
+                "PartNumber": request.part_number,
+            },
+            ExpiresIn=3600,  # 1 hour
+        )
+
+        return GetPartUrlResponse(
+            upload_url=presigned_url,
+            part_number=request.part_number,
+        )
+
+    except ClientError as e:
+        logger.error(f"Failed to generate part upload URL: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate part upload URL"
+        )
+
+
+@videos_router.post("/multipart/complete", response_model=CompleteMultipartResponse)
+async def complete_multipart_upload(request: CompleteMultipartRequest):
+    """
+    Complete a multipart upload after all parts are uploaded.
+    Call this when recording ends - should be instant since all data is already in S3.
+    """
+    s3_client = get_s3_client()
+    video_key = f"videos/{request.session_id}/recording.webm"
+
+    try:
+        # Complete the multipart upload
+        s3_client.complete_multipart_upload(
+            Bucket=settings.S3_BUCKET_NAME,
+            Key=video_key,
+            UploadId=request.upload_id,
+            MultipartUpload={
+                "Parts": [
+                    {"PartNumber": part.part_number, "ETag": part.etag}
+                    for part in sorted(request.parts, key=lambda p: p.part_number)
+                ]
+            },
+        )
+
+        # Generate presigned URL for viewing
+        presigned_url = s3_client.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": settings.S3_BUCKET_NAME,
+                "Key": video_key,
+            },
+            ExpiresIn=settings.S3_PRESIGNED_URL_EXPIRATION,
+        )
+
+        # Store in Supabase
+        supabase = get_supabase_client()
+        if supabase:
+            try:
+                existing = supabase.table("videos").select("*").eq("uuid", request.session_id).execute()
+                video_data = {
+                    "link": presigned_url,
+                    "public": request.is_public,
+                    "video_key": video_key,
+                }
+                if existing.data and len(existing.data) > 0:
+                    supabase.table("videos").update(video_data).eq("uuid", request.session_id).execute()
+                else:
+                    video_data["uuid"] = request.session_id
+                    supabase.table("videos").insert(video_data).execute()
+                logger.info(f"Stored video metadata for session {request.session_id}")
+            except Exception as db_error:
+                logger.warning(f"Failed to store video metadata: {db_error}")
+
+        logger.info(f"Completed multipart upload for session {request.session_id}")
+
+        return CompleteMultipartResponse(
+            success=True,
+            video_url=presigned_url,
+            video_key=video_key,
+        )
+
+    except ClientError as e:
+        logger.error(f"Failed to complete multipart upload: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to complete multipart upload"
+        )
+
+
+@videos_router.post("/multipart/abort")
+async def abort_multipart_upload(session_id: str, upload_id: str):
+    """
+    Abort a multipart upload if something goes wrong.
+    """
+    s3_client = get_s3_client()
+    video_key = f"videos/{session_id}/recording.webm"
+
+    try:
+        s3_client.abort_multipart_upload(
+            Bucket=settings.S3_BUCKET_NAME,
+            Key=video_key,
+            UploadId=upload_id,
+        )
+        logger.info(f"Aborted multipart upload for session {session_id}")
+        return {"success": True}
+
+    except ClientError as e:
+        logger.error(f"Failed to abort multipart upload: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to abort multipart upload"
         )

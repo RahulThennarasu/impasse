@@ -339,3 +339,123 @@ export async function getVideoDownloadUrl(
 
   return response.json();
 }
+
+// =============================================================================
+// Streaming Multipart Upload (for fast upload during recording)
+// =============================================================================
+
+export type StartMultipartResponse = {
+  upload_id: string;
+  video_key: string;
+};
+
+export type CompletedPart = {
+  part_number: number;
+  etag: string;
+};
+
+export type CompleteMultipartResponse = {
+  success: boolean;
+  video_url: string;
+  video_key: string;
+};
+
+/**
+ * Start a multipart upload session. Call when recording begins.
+ */
+export async function startMultipartUpload(
+  sessionId: string,
+  contentType: string = "video/webm"
+): Promise<StartMultipartResponse> {
+  const response = await fetch(`${getApiBaseUrl()}/videos/multipart/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_id: sessionId,
+      content_type: contentType,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to start multipart upload: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Get a presigned URL for uploading a specific part.
+ */
+export async function getPartUploadUrl(
+  sessionId: string,
+  uploadId: string,
+  partNumber: number
+): Promise<{ upload_url: string; part_number: number }> {
+  const response = await fetch(`${getApiBaseUrl()}/videos/multipart/part-url`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_id: sessionId,
+      upload_id: uploadId,
+      part_number: partNumber,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to get part upload URL: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Upload a single part to S3. Returns the ETag for completion.
+ */
+export async function uploadPart(
+  presignedUrl: string,
+  data: Blob
+): Promise<string> {
+  const response = await fetch(presignedUrl, {
+    method: "PUT",
+    body: data,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to upload part: ${response.statusText}`);
+  }
+
+  // Get ETag from response headers (needed to complete upload)
+  const etag = response.headers.get("ETag");
+  if (!etag) {
+    throw new Error("No ETag in response");
+  }
+
+  return etag;
+}
+
+/**
+ * Complete the multipart upload. Should be instant since data is already in S3.
+ */
+export async function completeMultipartUpload(
+  sessionId: string,
+  uploadId: string,
+  parts: CompletedPart[],
+  isPublic: boolean = false
+): Promise<CompleteMultipartResponse> {
+  const response = await fetch(`${getApiBaseUrl()}/videos/multipart/complete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_id: sessionId,
+      upload_id: uploadId,
+      parts,
+      is_public: isPublic,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to complete multipart upload: ${response.statusText}`);
+  }
+
+  return response.json();
+}

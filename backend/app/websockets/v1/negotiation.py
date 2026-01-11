@@ -9,6 +9,7 @@ Flow:
 5. Stream audio back to user
 """
 
+import uuid
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from starlette.websockets import WebSocketState
 import logging

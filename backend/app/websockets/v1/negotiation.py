@@ -9,13 +9,19 @@ Flow:
 5. Stream audio back to user
 """
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 import logging
 import json
 import asyncio
 import os
 import base64
 from typing import Dict, Optional
+import sys
+
+# Add agents to path
+sys.path.append(os.path.join(os.path.dirname(__file__), "../../../.."))
+
+from pydantic import BaseModel
 from agents.scenario_agent.scenario import generate_scenario
 from deepgram import DeepgramClient, DeepgramClientOptions, LiveOptions
 from deepgram.clients.live.v1 import LiveTranscriptionEvents
@@ -24,10 +30,6 @@ try:
 except ImportError:
     # Fallback if cartesia not installed
     Cartesia = None
-import sys
-
-# Add agents to path
-sys.path.append(os.path.join(os.path.dirname(__file__), "../../../.."))
 from agents.op_agent.op import OpponentAgent
 from agents.coach_agent.coach import CoachAgent
 
@@ -532,6 +534,32 @@ async def get_negotiation_session(session_id: str):
         "transcript_length": len(session.opponent.transcript),
         "status": "active"
     }
+
+
+class ScenarioContextRequest(BaseModel):
+    keywords: str
+
+
+@negotiation_router.post("/scenario_context")
+async def create_scenario_context(payload: ScenarioContextRequest):
+    try:
+        scenario = generate_scenario(payload.keywords)
+        if not isinstance(scenario, dict):
+            raise ValueError("Scenario generation failed")
+
+        title = (scenario.get("title") or scenario.get("scenario_title") or scenario.get("scenario_id") or "Practice scenario")
+        role = (scenario.get("role") or "Participant")
+        description = scenario.get("description") or scenario.get("user_narrative") or ""
+
+        return {
+            "title": title,
+            "role": role,
+            "description": description,
+            "agent_id": "opponent"
+        }
+    except Exception as e:
+        logger.error(f"Scenario generation failed: {e}")
+        raise HTTPException(status_code=500, detail="Scenario generation failed")
 
 @negotiation_router.post("/negotation/session/{session_id}/scenario_info")
 async def update_negotiation_scenario_info(session_id: str, scenario_info: str):

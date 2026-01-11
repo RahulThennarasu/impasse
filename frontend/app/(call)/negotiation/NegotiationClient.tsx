@@ -131,6 +131,7 @@ export function NegotiationClient() {
 
   const [isMuted, setIsMuted] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isSkipConfirmOpen, setIsSkipConfirmOpen] = useState(false);
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [sessionDuration, setSessionDuration] = useState("");
   const [isVideoOff, setIsVideoOff] = useState(false);
@@ -667,10 +668,10 @@ export function NegotiationClient() {
               </div>
               <Button
                 type="button"
-                onClick={() => setNotesRemaining(5)}
-                className="rounded-full border border-white/10 bg-black/50 px-4 py-2 text-xs font-semibold text-white/80 transition hover:bg-black/70 cursor-pointer"
+                onClick={() => setIsSkipConfirmOpen(true)}
+                className="rounded-full border border-olive/50 bg-olive/20 px-5 py-3 text-sm font-semibold text-white transition hover:bg-olive/30 cursor-pointer"
               >
-                Debug: set 5s left
+                Skip to negotiation
               </Button>
             </div>
           </div>
@@ -730,6 +731,39 @@ export function NegotiationClient() {
               >
                 Start negotiation
               </Button>
+            </DialogPanel>
+          </div>
+        </Dialog>
+
+        <Dialog open={isSkipConfirmOpen} onClose={() => setIsSkipConfirmOpen(false)} className="relative z-50">
+          <div className="fixed inset-0 bg-black/70" aria-hidden="true" />
+          <div className="fixed inset-0 flex items-center justify-center p-6">
+            <DialogPanel className="w-full max-w-md rounded-2xl border border-white/10 bg-black/90 p-8 text-white shadow-2xl">
+              <DialogTitle className="text-xl font-semibold text-white">
+                Skip to negotiation?
+              </DialogTitle>
+              <p className="mt-3 text-sm text-white/70">
+                You still have {formatTime(notesRemaining)} left for note-taking. Are you sure you want to start the negotiation now?
+              </p>
+              <div className="mt-6 flex gap-3">
+                <Button
+                  type="button"
+                  onClick={() => setIsSkipConfirmOpen(false)}
+                  className="flex-1 rounded-full border border-white/20 bg-transparent px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/10 cursor-pointer"
+                >
+                  Keep preparing
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setIsSkipConfirmOpen(false);
+                    startCall();
+                  }}
+                  className="flex-1 rounded-full bg-olive px-6 py-3 text-sm font-semibold text-white shadow-md transition hover:-translate-y-0.5 hover:shadow-lg cursor-pointer"
+                >
+                  Start now
+                </Button>
+              </div>
             </DialogPanel>
           </div>
         </Dialog>

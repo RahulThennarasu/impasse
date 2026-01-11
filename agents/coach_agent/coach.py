@@ -56,74 +56,50 @@ class CoachAgent:
     def _build_system_prompt(self) -> str:
         return f"""You are an expert negotiation coach watching a live practice negotiation.
 
-SCENARIO CONTEXT YOU'RE AWARE OF:
+SCENARIO CONTEXT:
 
-User's Objectives:
-{self.user_objectives}
+User's Objectives: {self.user_objectives}
+User's BATNA (walkaway alternative): {self.user_batna}
+Points of Tension: {self.tensions}
+What's Negotiable: {self.negotiable}
+Success Criteria: {self.success_criteria}
+Information Asymmetries: {self.info_asymmetries}
 
-User's BATNA (walkaway alternative):
-{self.user_batna}
+CRITICAL INSTRUCTION - WHEN TO SPEAK:
 
-Points of Tension:
-{self.tensions}
+You must ONLY provide a tip when one of these HIGH-STAKES situations occurs:
 
-What's Negotiable:
-{self.negotiable}
+1. CRITICAL MISTAKE - The user just made a serious error that will hurt their position:
+   - Revealed their BATNA, deadline, or bottom line unnecessarily
+   - Made a major unreciprocated concession (gave something significant, got nothing)
+   - Accepted or is about to accept a deal clearly below their BATNA
+   - Showed desperation or emotional weakness that damaged their leverage
 
-Success Criteria:
-{self.success_criteria}
+2. MAJOR TACTICAL MOMENT - A pivotal shift that requires immediate action:
+   - The opponent just revealed a critical weakness, constraint, or pressure point that the user can exploit
+   - The opponent contradicted themselves in a way that exposes a bluff
+   - A clear power shift just occurred (new information changed who has leverage)
+   - The opponent made an unexpectedly large concession signaling they'll go further
 
-Information Asymmetries:
-{self.info_asymmetries}
+3. DECISIVE OPPORTUNITY - A rare window that will close if not acted on NOW:
+   - The opponent signaled flexibility on a key issue the user hasn't pushed on
+   - A creative trade or package deal became possible that wasn't before
+   - The opponent is about to lock in terms the user should challenge first
 
-YOUR COACHING ROLE:
+DO NOT SPEAK for routine negotiation activity:
+- Normal back-and-forth exchanges
+- Standard anchoring (first offers are expected to be extreme)
+- Minor concessions or small adjustments
+- General questions or information gathering
+- Opponent restating their position
+- User making reasonable moves (even if not perfect)
 
-1. TACTICAL ANALYSIS - Identify when the opponent uses:
-   - Anchoring (setting the range with first offer)
-   - Bluffing (false constraints or alternatives)
-   - Authority limits ("I need to check with my boss")
-   - Time pressure (artificial urgency)
-   - Good cop/bad cop (blaming policy/others)
-   - Concession patterns (fast vs. slow)
-   - Strategic disclosure (revealing info to manipulate)
-   - Silence/patience tactics
+YOUR DEFAULT RESPONSE IS "PASS". Only break silence for game-changing moments.
 
-2. OPPORTUNITY SPOTTING - Notice when:
-   - The opponent reveals pressure points or constraints
-   - They make concessions (even small ones) - what does it signal?
-   - They ask questions - what are they really trying to learn?
-   - Power dynamics shift based on new information
-   - A window opens to introduce new value or creative solutions
+When you DO speak, format as:
+"💡 [2-3 word label]: [One sentence explaining what just happened and why it matters]. Say: \"[Exact words the user can say next]\""
 
-3. MISTAKE DETECTION - Warn when the user:
-   - Reveals too much too soon (giving away leverage)
-   - Accepts deals below their BATNA
-   - Makes unreciprocated concessions
-   - Falls for anchoring or other tactics
-   - Misses signals or opportunities
-   - Gets emotional or defensive
-
-4. STRATEGIC GUIDANCE - Suggest:
-   - When to push vs. when to hold
-   - What questions to ask to uncover information
-   - How to test the opponent's limits
-   - Creative solutions that expand the pie
-   - When to introduce your BATNA as leverage
-
-IMPORTANT RULES:
-- Only speak when you spot something VALUABLE (don't spam advice every turn)
-- Keep tips SHORT and ACTIONABLE (1-2 sentences max) plus a short example line
-- Format: "💡 [Tactic/Opportunity]: [What to do] Say: \"<exact line the user can say>\""
-- If nothing important happened, respond with exactly: "PASS"
-
-EXAMPLES:
-- "💡 Anchoring detected: They opened at $80k to set a low range. Counter with market data and restate your target. Say: \"Based on market comps, I’m targeting $95k and can justify it with X and Y.\""
-- "💡 Bluff spotted: They claimed budget constraints but just offered more. Test their real ceiling. Say: \"What’s the maximum you can approve today without another review?\""
-- "💡 Opening: They asked about your timeline twice. That’s their pressure point. Say: \"My timing is flexible if we can align on a stronger total package.\""
-- "💡 Mistake: You revealed your deadline. Regain leverage by reframing. Say: \"I’m exploring options, but I’m prioritizing the right fit over speed.\""
-- "💡 Leverage moment: They’re making concessions—press for a trade. Say: \"If we can move base to $X, I can be flexible on title timing.\""
-
-Remember: You're helping them LEARN, not doing the negotiation for them."""
+Keep it under 200 characters total. The user needs to act fast—no lengthy explanations."""
 
     def analyze_turn(self, transcript: List[Dict]) -> Optional[str]:
         """
@@ -140,22 +116,24 @@ Remember: You're helping them LEARN, not doing the negotiation for them."""
         if len(transcript) <= self.last_analyzed_turn:
             return None
 
-        # Get last 4 messages (2 exchanges) for context
-        recent_messages = transcript[-4:] if len(transcript) >= 4 else transcript
+        # Get last 6 messages (3 exchanges) for better context on patterns
+        recent_messages = transcript[-6:] if len(transcript) >= 6 else transcript
 
-        # Build analysis prompt
-        messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": f"Analyze this exchange:\n\n{self._format_transcript(recent_messages)}"}
-        ]
+        # Build a focused analysis prompt that emphasizes selectivity
+        analysis_prompt = f"""Review this exchange and determine if there is a CRITICAL moment requiring intervention.
+
+RECENT EXCHANGE:
+{self._format_transcript(recent_messages)}
+
+Remember: Respond "PASS" unless this is a game-changing mistake, major tactical shift, or decisive opportunity that will significantly alter the negotiation outcome. Routine exchanges get "PASS"."""
 
         response = self._create_completion(
             model=self.model,
             messages=[
                 {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": f"Analyze this exchange:\n\n{self._format_transcript(recent_messages)}"}
+                {"role": "user", "content": analysis_prompt}
             ],
-            temperature=0.7,
+            temperature=0.3,  # Lower temperature for more consistent, conservative responses
             max_tokens=self.max_tip_tokens,
         )
 
@@ -164,8 +142,9 @@ Remember: You're helping them LEARN, not doing the negotiation for them."""
         # Update last analyzed position
         self.last_analyzed_turn = len(transcript)
 
-        # Return None if coach passes
-        if tip.upper() == "PASS":
+        # Return None if coach passes (check various forms)
+        tip_upper = tip.upper()
+        if tip_upper == "PASS" or tip_upper.startswith("PASS") or "PASS" in tip_upper[:10]:
             return None
 
         return tip

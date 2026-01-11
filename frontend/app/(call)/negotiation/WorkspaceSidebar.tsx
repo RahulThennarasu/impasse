@@ -72,7 +72,7 @@ export function WorkspaceSidebar({
                   Tip: Keep your opening number 10-15% above your target. Let the opponent come up to you.
                 </div>
               </Tab.Panel>
-              <Tab.Panel className="space-y-4">
+              <Tab.Panel className="space-y-4 max-h-full overflow-y-auto pr-2">
                 {coachSuggestions.map((suggestion) => (
                   <Disclosure key={suggestion.id}>
                     {({ open }) => (

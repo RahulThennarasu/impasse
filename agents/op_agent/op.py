@@ -47,7 +47,8 @@ class OpponentAgent:
                 - personality: Communication style (friendly, aggressive, etc.)
         """
         self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        self.model = os.getenv("GROQ_OPPONENT_MODEL", "llama-3.3-70b-versatile")
+        self.model = os.getenv("GROQ_OPPONENT_MODEL", "groq/compound")
+        self.fallback_model = os.getenv("GROQ_OPPONENT_FALLBACK_MODEL", "groq/compound-mini")
         self.max_history_messages = int(os.getenv("GROQ_OPPONENT_HISTORY", "2"))
         self.max_opening_tokens = int(os.getenv("GROQ_OPPONENT_OPENING_TOKENS", "60"))
         self.max_response_tokens = int(os.getenv("GROQ_OPPONENT_RESPONSE_TOKENS", "80"))
@@ -105,7 +106,7 @@ RULES:
         opening_prompt = """Generate your opening line. First thing you say when the meeting begins.
 Greet them, set your tone, maybe hint at the agenda. 1-2 sentences, no stage directions."""
 
-        response = self.client.chat.completions.create(
+        response = self._create_completion(
             model=self.model,
             messages=[
                 {"role": "system", "content": self.system_prompt},
@@ -140,7 +141,7 @@ Greet them, set your tone, maybe hint at the agenda. 1-2 sentences, no stage dir
         messages = [{"role": "system", "content": self.system_prompt}]
         messages.extend(history)
 
-        response = self.client.chat.completions.create(
+        response = self._create_completion(
             model=self.model,
             messages=messages,
             temperature=0.85,
@@ -151,6 +152,25 @@ Greet them, set your tone, maybe hint at the agenda. 1-2 sentences, no stage dir
         # Add opponent response to transcript
         self.transcript.append({"role": "assistant", "content": opponent_response})
         return opponent_response
+
+    def _create_completion(self, model: str, messages: List[Dict[str, str]], temperature: float, max_tokens: int):
+        try:
+            return self.client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+        except Exception as e:
+            error_text = str(e).lower()
+            if "rate_limit" in error_text or "429" in error_text:
+                return self.client.chat.completions.create(
+                    model=self.fallback_model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+            raise
 
     def get_hidden_state(self) -> Dict:
         """

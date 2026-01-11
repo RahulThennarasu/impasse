@@ -126,8 +126,8 @@ class NegotiationSession:
         self.user_turns = 0
         self.coach_every_n_turns = int(os.getenv("COACH_EVERY_N_TURNS", "3"))
         self.coach_max_chars = int(os.getenv("COACH_MAX_CHARS", "220"))
-        self.coach_early_turns = int(os.getenv("COACH_EARLY_TURNS", "4"))
-        self.coach_early_every_n_turns = int(os.getenv("COACH_EARLY_EVERY_N_TURNS", "2"))
+        self.coach_early_turns = int(os.getenv("COACH_EARLY_TURNS", "3"))
+        self.coach_early_every_n_turns = int(os.getenv("COACH_EARLY_EVERY_N_TURNS", "1"))
         self.acceptance_phrases = [
             p.strip().lower() for p in os.getenv(
                 "NEGOTIATION_ACCEPT_PHRASES",
@@ -289,16 +289,17 @@ class NegotiationSession:
             # Generate audio from opponent response
             await self.generate_and_stream_audio(opponent_response)
 
-            # Get coach analysis on a reduced cadence; only forward short actionable tips
+            # Get coach analysis on a reduced cadence; normalize output before sending
             self.user_turns += 1
             cadence = self.coach_early_every_n_turns if self.user_turns <= self.coach_early_turns else self.coach_every_n_turns
             if cadence > 0 and self.user_turns % cadence == 0:
                 coach_tip = self.coach.analyze_turn(self.opponent.transcript)
-                if coach_tip and coach_tip.startswith("💡") and len(coach_tip) <= self.coach_max_chars:
-                    logger.info(f"Session {self.session_id}: Coach tip: {coach_tip}")
+                tip = self._normalize_coach_tip(coach_tip)
+                if tip:
+                    logger.info(f"Session {self.session_id}: Coach tip: {tip}")
                     await self.websocket.send_json({
                         "type": "coach_tip",
-                        "text": coach_tip
+                        "text": tip
                     })
 
         except Exception as e:
@@ -487,8 +488,28 @@ class NegotiationSession:
             # Generate and stream opening audio
             await self.generate_and_stream_audio(opening)
 
+            # Provide an early coach nudge if available
+            tip = self._normalize_coach_tip(self.coach.analyze_turn(self.opponent.transcript))
+            if tip:
+                await self.websocket.send_json({
+                    "type": "coach_tip",
+                    "text": tip
+                })
+
         except Exception as e:
             logger.error(f"Session {self.session_id}: Error getting opening: {e}")
+
+    def _normalize_coach_tip(self, coach_tip: Optional[str]) -> str:
+        if not coach_tip:
+            return ""
+        tip = coach_tip.strip()
+        if tip.upper() == "PASS":
+            return ""
+        if not tip.startswith("💡"):
+            tip = f"💡 {tip}"
+        if len(tip) > self.coach_max_chars:
+            tip = tip[: self.coach_max_chars - 1].rstrip() + "…"
+        return tip
 
     def handle_barge_in(self):
         """Handle user interruption - cancel TTS and prepare for new input"""

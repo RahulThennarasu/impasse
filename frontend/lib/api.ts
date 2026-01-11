@@ -102,6 +102,7 @@ export type PresignedUrlResponse = {
 export type UploadConfirmResponse = {
   success: boolean;
   video_url: string;
+  is_public: boolean;
 };
 
 /**
@@ -168,7 +169,8 @@ export async function uploadVideoToS3(
  */
 export async function confirmVideoUpload(
   sessionId: string,
-  videoKey: string
+  videoKey: string,
+  isPublic: boolean = false
 ): Promise<UploadConfirmResponse> {
   const response = await fetch(`${getApiBaseUrl()}/videos/confirm-upload`, {
     method: "POST",
@@ -176,6 +178,7 @@ export async function confirmVideoUpload(
     body: JSON.stringify({
       session_id: sessionId,
       video_key: videoKey,
+      is_public: isPublic,
     }),
   });
 
@@ -192,6 +195,7 @@ export async function confirmVideoUpload(
 export async function uploadNegotiationVideo(
   sessionId: string,
   videoBlob: Blob,
+  isPublic: boolean = false,
   onProgress?: (progress: number) => void
 ): Promise<string> {
   // Step 1: Get presigned URL
@@ -203,8 +207,8 @@ export async function uploadNegotiationVideo(
   // Step 2: Upload to S3
   await uploadVideoToS3(upload_url, videoBlob, onProgress);
 
-  // Step 3: Confirm upload
-  const { video_url } = await confirmVideoUpload(sessionId, video_key);
+  // Step 3: Confirm upload with public flag
+  const { video_url } = await confirmVideoUpload(sessionId, video_key, isPublic);
 
   return video_url;
 }

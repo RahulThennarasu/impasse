@@ -18,13 +18,12 @@ import os
 import base64
 import sys
 import httpx
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 # Add agents to path
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../../.."))
 
 from pydantic import BaseModel
-from supabase import create_client, Client
 from app.core.config import settings
 from agents.scenario_agent.scenario import generate_scenario
 from deepgram import DeepgramClient, DeepgramClientOptions, LiveOptions
@@ -42,12 +41,19 @@ logger = logging.getLogger(__name__)
 negotiation_router = APIRouter()
 
 
-def get_supabase_client() -> Client:
+def get_supabase_client():
     """Initialize and return a Supabase client"""
     if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
         raise HTTPException(
             status_code=500,
             detail="Supabase credentials not configured"
+        )
+    try:
+        from supabase import create_client
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Supabase client unavailable: {e}"
         )
     return create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
 

@@ -804,7 +804,7 @@ async def get_video_analytics(session_id: str):
         supabase = get_supabase_client()
         
         # Query the videos table for the specific session
-        response = supabase.table("videos").select("analytics").eq("uuid", session_id).execute()
+        response = supabase.table("recordings").select("analysis").eq("id", session_id).execute()
         
         if not response.data or len(response.data) == 0:
             raise HTTPException(
@@ -812,7 +812,7 @@ async def get_video_analytics(session_id: str):
                 detail=f"No video session found with ID: {session_id}"
             )
         
-        analytics = response.data[0].get("analytics", {})
+        analytics = response.data[0].get("analysis", {})
         logger.info(f"Retrieved analytics for session: {session_id}")
         
         return {"session_id": session_id, "analytics": analytics}

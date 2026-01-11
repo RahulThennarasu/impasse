@@ -200,7 +200,7 @@ export function NegotiationClient() {
 
   const startTestAudio = useCallback(async () => {
     if (!audioRef.current) {
-      const audio = new Audio("/test-loop.mp3");
+      const audio = new Audio("/test.m4a");
       audio.loop = true;
       audio.preload = "auto";
       audioRef.current = audio;

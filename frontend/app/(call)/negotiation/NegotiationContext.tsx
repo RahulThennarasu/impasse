@@ -140,11 +140,7 @@ export function NegotiationProvider({ children }: { children: React.ReactNode })
     }
   }, [state.phase, notesRemaining]);
 
-  useEffect(() => {
-    if (state.phase === "call" && state.callStartedAt && callRemaining === 0) {
-      setState((prev) => ({ ...prev, phase: "ended" }));
-    }
-  }, [state.phase, state.callStartedAt, callRemaining]);
+  // Note: Call timer is display-only (no auto-end). Negotiation ends manually or when user accepts.
 
   const setNotes = useCallback((value: string) => {
     setState((prev) => ({ ...prev, notes: value }));

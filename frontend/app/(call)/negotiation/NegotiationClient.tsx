@@ -122,6 +122,8 @@ export function NegotiationClient() {
   const wsRef = useRef<WebSocket | null>(null);
   const rafRef = useRef<number | null>(null);
   const autoEndRef = useRef(false);
+  const negotiationCompleteRef = useRef(false);
+  const negotiationCompleteResolveRef = useRef<((value: boolean) => void) | null>(null);
   const ttsSourcesRef = useRef<AudioBufferSourceNode[]>([]);
   const isTtsPlayingRef = useRef(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -214,6 +216,51 @@ export function NegotiationClient() {
       });
     };
   }, [phase]);
+
+  const waitForNegotiationComplete = useCallback((timeoutMs: number = 6000) => {
+    if (negotiationCompleteRef.current) {
+      return Promise.resolve(true);
+    }
+
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      return Promise.resolve(false);
+    }
+
+    return new Promise<boolean>((resolve) => {
+      const timer = window.setTimeout(() => {
+        if (negotiationCompleteResolveRef.current === resolve) {
+          negotiationCompleteResolveRef.current = null;
+        }
+        resolve(false);
+      }, timeoutMs);
+
+      negotiationCompleteResolveRef.current = (value: boolean) => {
+        window.clearTimeout(timer);
+        negotiationCompleteResolveRef.current = null;
+        resolve(value);
+      };
+    });
+  }, []);
+
+  const requestPostMortemWithRetry = useCallback(
+    async (attempts: number = 4, delayMs: number = 800) => {
+      if (!sessionId) return;
+      let lastError: unknown;
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        try {
+          await requestPostMortem(sessionId);
+          return;
+        } catch (error) {
+          lastError = error;
+          if (attempt < attempts - 1) {
+            await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+          }
+        }
+      }
+      throw lastError;
+    },
+    [sessionId]
+  );
 
   useEffect(() => {
     if (!stream) return;
@@ -361,6 +408,8 @@ export function NegotiationClient() {
 
   useEffect(() => {
     if (!sessionId || phase !== "call") return;
+    negotiationCompleteRef.current = false;
+    negotiationCompleteResolveRef.current = null;
     const wsUrl = `${getWsBaseUrl()}/api/v1/ws/negotiation/${sessionId}`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
@@ -496,6 +545,8 @@ export function NegotiationClient() {
         }
         if (data.type === "negotiation_complete") {
           setAgentStatus("idle");
+          negotiationCompleteRef.current = true;
+          negotiationCompleteResolveRef.current?.(true);
         }
       } catch {
         setMediaError("Received malformed socket message.");
@@ -581,9 +632,11 @@ export function NegotiationClient() {
       wsRef.current.send(JSON.stringify({ type: "end_negotiation" }));
     }
     endCall();
-
-    handleNavigateToPostMortem();
-  }, [callRemaining, endCall, handleNavigateToPostMortem]);
+    void (async () => {
+      await waitForNegotiationComplete();
+      await handleNavigateToPostMortem();
+    })();
+  }, [endCall, handleNavigateToPostMortem, waitForNegotiationComplete]);
 
   const handleNavigateToPostMortem = useCallback(async () => {
     // Stop all tracks
@@ -591,13 +644,13 @@ export function NegotiationClient() {
 
     if (sessionId) {
       try {
-        await requestPostMortem(sessionId);
-      } catch {
-        setMediaError("Failed to request post-mortem analysis.");
+        await requestPostMortemWithRetry();
+      } catch (error) {
+        console.error("Failed to request post-mortem analysis:", error);
       }
     }
     router.push(`/postmortem/${sessionId || "current-session"}`);
-  }, [router, stream, sessionId]);
+  }, [requestPostMortemWithRetry, router, stream, sessionId]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);

@@ -16,6 +16,7 @@ import asyncio
 import os
 import base64
 from typing import Dict, Optional
+from agents.scenario_agent.scenario import generate_scenario
 from deepgram import DeepgramClient, DeepgramClientOptions, LiveOptions
 from deepgram.clients.live.v1 import LiveTranscriptionEvents
 try:
@@ -530,4 +531,18 @@ async def get_negotiation_session(session_id: str):
         "session_id": session_id,
         "transcript_length": len(session.opponent.transcript),
         "status": "active"
+    }
+
+@negotiation_router.post("/negotation/session/{session_id}/scenario_info")
+async def update_negotiation_scenario_info(session_id: str, scenario_info: str):
+    """Update scenario information for a video call session"""
+    session = get_negotiation_session(session_id)
+    if not session:
+        return {"error": "Session not found", "session_id": session_id}
+    
+    scenario_para = generate_scenario(scenario_info)
+    logger.info(f"Session {session_id}: Scenario info updated")
+    
+    return {
+        "scenario_paragraph": scenario_para
     }

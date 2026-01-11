@@ -62,6 +62,7 @@ class UploadConfirmResponse(BaseModel):
     success: bool
     video_url: str
     is_public: bool
+    expires_in: Optional[int] = None
 
 
 @videos_router.post("/presigned-url", response_model=PresignedUrlResponse)
@@ -131,7 +132,17 @@ async def confirm_upload(request: UploadConfirmRequest):
             Key=request.video_key,
         )
 
-        video_url = f"https://{settings.S3_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/{request.video_key}"
+        storage_url = (
+            f"https://{settings.S3_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/{request.video_key}"
+        )
+        presigned_url = s3_client.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": settings.S3_BUCKET_NAME,
+                "Key": request.video_key,
+            },
+            ExpiresIn=settings.S3_PRESIGNED_URL_EXPIRATION,
+        )
 
         # Store video metadata in Supabase with public flag
         supabase = get_supabase_client()
@@ -143,7 +154,7 @@ async def confirm_upload(request: UploadConfirmRequest):
                 if existing.data and len(existing.data) > 0:
                     # Update existing record
                     supabase.table("videos").update({
-                        "link": video_url,
+                        "link": storage_url,
                         "public": request.is_public
                     }).eq("uuid", request.session_id).execute()
                     logger.info(f"Updated video record for session {request.session_id} (public={request.is_public})")
@@ -151,7 +162,7 @@ async def confirm_upload(request: UploadConfirmRequest):
                     # Insert new record
                     supabase.table("videos").insert({
                         "uuid": request.session_id,
-                        "link": video_url,
+                        "link": storage_url,
                         "public": request.is_public
                     }).execute()
                     logger.info(f"Created video record for session {request.session_id} (public={request.is_public})")
@@ -163,8 +174,9 @@ async def confirm_upload(request: UploadConfirmRequest):
 
         return UploadConfirmResponse(
             success=True,
-            video_url=video_url,
+            video_url=presigned_url,
             is_public=request.is_public,
+            expires_in=settings.S3_PRESIGNED_URL_EXPIRATION,
         )
 
     except ClientError as e:

@@ -103,6 +103,7 @@ export type UploadConfirmResponse = {
   success: boolean;
   video_url: string;
   is_public: boolean;
+  expires_in?: number;
 };
 
 /**
@@ -221,7 +222,7 @@ export async function getVideoDownloadUrl(
   expiresIn: number = 3600
 ): Promise<{ download_url: string; expires_in: number }> {
   const response = await fetch(
-    `${getApiBaseUrl()}/videos/download-url/${sessionId}?expires_in=${expiresIn}`
+    `${getServerApiBaseUrl()}/videos/download-url/${sessionId}?expires_in=${expiresIn}`
   );
 
   if (!response.ok) {

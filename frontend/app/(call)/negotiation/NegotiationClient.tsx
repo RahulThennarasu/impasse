@@ -607,6 +607,20 @@ export function NegotiationClient() {
     };
   }, [stream, isMuted, socketReady, phase, stopTtsPlayback]);
 
+  const handleNavigateToPostMortem = useCallback(async () => {
+    // Stop all tracks
+    stream?.getTracks().forEach((track) => track.stop());
+
+    if (sessionId) {
+      try {
+        await requestPostMortemWithRetry();
+      } catch (error) {
+        console.error("Failed to request post-mortem analysis:", error);
+      }
+    }
+    router.push(`/postmortem/${sessionId || "current-session"}`);
+  }, [requestPostMortemWithRetry, router, stream, sessionId]);
+
   const handleEndSession = useCallback(() => {
     autoEndRef.current = true;
 
@@ -624,20 +638,6 @@ export function NegotiationClient() {
       await handleNavigateToPostMortem();
     })();
   }, [endCall, handleNavigateToPostMortem, waitForNegotiationComplete]);
-
-  const handleNavigateToPostMortem = useCallback(async () => {
-    // Stop all tracks
-    stream?.getTracks().forEach((track) => track.stop());
-
-    if (sessionId) {
-      try {
-        await requestPostMortemWithRetry();
-      } catch (error) {
-        console.error("Failed to request post-mortem analysis:", error);
-      }
-    }
-    router.push(`/postmortem/${sessionId || "current-session"}`);
-  }, [requestPostMortemWithRetry, router, stream, sessionId]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);

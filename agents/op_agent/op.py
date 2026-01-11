@@ -50,9 +50,9 @@ class OpponentAgent:
                 - personality: Communication style (friendly, aggressive, etc.)
         """
         self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        self.model = os.getenv("GROQ_OPPONENT_MODEL", "llama-3.1-8b-instant")
-        self.fallback_model = os.getenv("GROQ_OPPONENT_FALLBACK_MODEL", "llama-3.1-8b-instant")
-        self.max_history_messages = int(os.getenv("GROQ_OPPONENT_HISTORY", "6"))
+        self.model = os.getenv("GROQ_OPPONENT_MODEL", "llama-3.3-70b-versatile")
+        self.fallback_model = os.getenv("GROQ_OPPONENT_FALLBACK_MODEL", "llama-3.3-70b-versatile")
+        self.max_history_messages = int(os.getenv("GROQ_OPPONENT_HISTORY", "0"))
         self.max_opening_tokens = int(os.getenv("GROQ_OPPONENT_OPENING_TOKENS", "100"))
         self.max_response_tokens = int(os.getenv("GROQ_OPPONENT_RESPONSE_TOKENS", "150"))
 
@@ -94,6 +94,7 @@ CRITICAL RULES:
 6. NEGOTIATE IN YOUR OWN INTEREST. You want the best deal for YOUR side. Don't give away more than you have to. Push back. Counter-offer. Protect your budget/constraints.
 7. NEVER offer more than what they're asking for. If they ask for X, you counter with less than X or equal to X at most—never more.
 8. Start with your lowest reasonable offer and only increase if they push back convincingly.
+9. Do NOT invent numbers or terms. Only use numbers given in this prompt or stated by the user. If no numbers have been stated, ask once for a range, then move on without repeating.
 
 === YOUR SITUATION ===
 {self.context}

@@ -22,7 +22,8 @@ class Settings(BaseSettings):
 
     # Supabase Configuration
     SUPABASE_URL: Optional[str] = None
-    SUPABASE_KEY: Optional[str] = None
+    SUPABASE_API_KEY: Optional[str] = None
+    SUPABASE_SERVICE_ROLE_KEY: Optional[str] = None
 
 
 settings = Settings()

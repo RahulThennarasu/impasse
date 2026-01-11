@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createScenarioContext, type ScenarioContext } from "@/lib/api";
+import { createScenarioContext, createVideoSession, type ScenarioContext } from "@/lib/api";
 
 export function ScenarioForm() {
   const router = useRouter();
@@ -27,10 +27,16 @@ export function ScenarioForm() {
 
   const handleStart = () => {
     if (!scenario) return;
-    const sessionId = crypto.randomUUID();
     const agentId = scenario.agent_id ?? "opponent";
-    sessionStorage.setItem(`scenario:${sessionId}`, JSON.stringify(scenario));
-    router.push(`/negotiation?sessionId=${sessionId}&agentId=${agentId}`);
+    createVideoSession("pending")
+      .then((videoSession) => {
+        const sessionId = videoSession.session_id;
+        sessionStorage.setItem(`scenario:${sessionId}`, JSON.stringify(scenario));
+        router.push(`/negotiation?sessionId=${sessionId}&agentId=${agentId}`);
+      })
+      .catch(() => {
+        setError("Unable to create session. Try again.");
+      });
   };
 
   return (

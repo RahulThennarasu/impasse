@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from typing import List, Dict
 from groq import Groq
 
@@ -67,6 +68,7 @@ class OpponentAgent:
         # Initialize transcript
         self.transcript = []
         self.revealed_info = []
+        self.current_turn = 0
 
         # Build system prompt
         self.system_prompt = self._build_system_prompt()
@@ -94,7 +96,17 @@ RULES:
 - Protect your private info and limits unless strategically revealing them.
 - Concede slowly. Extract value for every concession.
 - React emotionally when appropriate—through your words, not actions.
-- Stay consistent with what you've already said."""
+- Stay consistent with what you've already said.
+
+ADAPTIVE DIFFICULTY:
+- If the user seems inexperienced (vague asks, no clear goals, accepts quickly), be more collaborative and hint at better options they could pursue.
+- If the user is skilled (anchors well, asks probing questions, trades strategically), push back harder and use more advanced tactics.
+
+CLOSING THE DEAL:
+- When both parties seem aligned on terms, naturally confirm: "So we're agreeing to [summarize key terms]. Do we have a deal?"
+- If they accept or agree to your proposal, close warmly: "Great, I think we've got a deal. I'll get the paperwork started."
+- If you sense they're ready to accept, make it easy for them to say yes.
+- Don't drag out a negotiation that's clearly reached agreement—wrap it up."""
 
     def get_opening_message(self) -> str:
         """
@@ -117,8 +129,13 @@ Greet them, set your tone, maybe hint at the agenda. 1-2 sentences, no stage dir
         )
 
         opening = response.choices[0].message.content or ""
-        # Add to transcript as assistant message
-        self.transcript.append({"role": "assistant", "content": opening})
+        # Add to transcript as assistant message with timestamp
+        self.transcript.append({
+            "role": "assistant",
+            "content": opening,
+            "timestamp": datetime.now().isoformat(),
+            "turn": 0
+        })
         return opening
 
     def get_response(self, user_message: str) -> str:
@@ -131,15 +148,24 @@ Greet them, set your tone, maybe hint at the agenda. 1-2 sentences, no stage dir
         Returns:
             The opponent's response text
         """
-        # Add user message to transcript
-        self.transcript.append({"role": "user", "content": user_message})
+        # Increment turn counter for user message
+        self.current_turn += 1
+
+        # Add user message to transcript with timestamp
+        self.transcript.append({
+            "role": "user",
+            "content": user_message,
+            "timestamp": datetime.now().isoformat(),
+            "turn": self.current_turn
+        })
 
         # Use recent history for context (configurable)
-        history = self.transcript[-self.max_history_messages:] if self.max_history_messages > 0 else self.transcript
+        recent_transcript = self.transcript[-self.max_history_messages:] if self.max_history_messages > 0 else self.transcript
 
-        # Build messages for LLM: system prompt + conversation history
+        # Build messages for LLM: system prompt + conversation history (only role and content)
         messages = [{"role": "system", "content": self.system_prompt}]
-        messages.extend(history)
+        for entry in recent_transcript:
+            messages.append({"role": entry["role"], "content": entry["content"]})
 
         response = self._create_completion(
             model=self.model,
@@ -149,8 +175,13 @@ Greet them, set your tone, maybe hint at the agenda. 1-2 sentences, no stage dir
         )
 
         opponent_response = response.choices[0].message.content or ""
-        # Add opponent response to transcript
-        self.transcript.append({"role": "assistant", "content": opponent_response})
+        # Add opponent response to transcript with timestamp
+        self.transcript.append({
+            "role": "assistant",
+            "content": opponent_response,
+            "timestamp": datetime.now().isoformat(),
+            "turn": self.current_turn
+        })
         return opponent_response
 
     def _create_completion(self, model: str, messages: List[Dict[str, str]], temperature: float, max_tokens: int):

@@ -12,10 +12,8 @@ import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import {
   getWsBaseUrl,
   requestPostMortem,
-  uploadNegotiationVideo,
   type CoachTip,
 } from "@/lib/api";
-import { UploadModal } from "@/components/UploadModal";
 
 const initialCoachSuggestions: CoachTip[] = [];
 
@@ -112,16 +110,15 @@ export function NegotiationClient() {
   const wsRef = useRef<WebSocket | null>(null);
   const rafRef = useRef<number | null>(null);
   const autoEndRef = useRef(false);
+  const negotiationCompleteRef = useRef(false);
+  const negotiationCompleteResolveRef = useRef<((value: boolean) => void) | null>(null);
   const ttsSourcesRef = useRef<AudioBufferSourceNode[]>([]);
   const isTtsPlayingRef = useRef(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
 
   const [isMuted, setIsMuted] = useState(false);
-  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isSkipConfirmOpen, setIsSkipConfirmOpen] = useState(false);
-  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
-  const [sessionDuration, setSessionDuration] = useState("");
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [mediaError, setMediaError] = useState<string | null>(null);
@@ -183,11 +180,6 @@ export function NegotiationClient() {
             }
           };
 
-          mediaRecorder.onstop = () => {
-            const blob = new Blob(recordedChunksRef.current, { type: "video/webm" });
-            setRecordedBlob(blob);
-          };
-
           mediaRecorder.start(1000); // Collect data every second
         } catch (recorderError) {
           console.warn("MediaRecorder not supported, video upload will be disabled:", recorderError);
@@ -212,6 +204,51 @@ export function NegotiationClient() {
       });
     };
   }, [phase]);
+
+  const waitForNegotiationComplete = useCallback((timeoutMs: number = 6000) => {
+    if (negotiationCompleteRef.current) {
+      return Promise.resolve(true);
+    }
+
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      return Promise.resolve(false);
+    }
+
+    return new Promise<boolean>((resolve) => {
+      const timer = window.setTimeout(() => {
+        if (negotiationCompleteResolveRef.current === resolve) {
+          negotiationCompleteResolveRef.current = null;
+        }
+        resolve(false);
+      }, timeoutMs);
+
+      negotiationCompleteResolveRef.current = (value: boolean) => {
+        window.clearTimeout(timer);
+        negotiationCompleteResolveRef.current = null;
+        resolve(value);
+      };
+    });
+  }, []);
+
+  const requestPostMortemWithRetry = useCallback(
+    async (attempts: number = 4, delayMs: number = 800) => {
+      if (!sessionId) return;
+      let lastError: unknown;
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        try {
+          await requestPostMortem(sessionId);
+          return;
+        } catch (error) {
+          lastError = error;
+          if (attempt < attempts - 1) {
+            await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+          }
+        }
+      }
+      throw lastError;
+    },
+    [sessionId]
+  );
 
   useEffect(() => {
     if (!stream) return;
@@ -359,6 +396,8 @@ export function NegotiationClient() {
 
   useEffect(() => {
     if (!sessionId || phase !== "call") return;
+    negotiationCompleteRef.current = false;
+    negotiationCompleteResolveRef.current = null;
     const wsUrl = `${getWsBaseUrl()}/api/v1/ws/negotiation/${sessionId}`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
@@ -483,6 +522,8 @@ export function NegotiationClient() {
         }
         if (data.type === "negotiation_complete") {
           setAgentStatus("idle");
+          negotiationCompleteRef.current = true;
+          negotiationCompleteResolveRef.current?.(true);
         }
       } catch {
         setMediaError("Received malformed socket message.");
@@ -574,40 +615,29 @@ export function NegotiationClient() {
       mediaRecorderRef.current.stop();
     }
 
-    // Calculate session duration for display
-    setSessionDuration(formatTime(callRemaining));
-
     if (wsRef.current) {
       wsRef.current.send(JSON.stringify({ type: "end_negotiation" }));
     }
     endCall();
-
-    // Show upload modal instead of immediately navigating
-    setIsUploadModalOpen(true);
-  }, [callRemaining, endCall]);
-
-  const handleUpload = useCallback(async () => {
-    if (!recordedBlob || !sessionId) {
-      throw new Error("No recording available");
-    }
-    await uploadNegotiationVideo(sessionId, recordedBlob);
-  }, [recordedBlob, sessionId]);
+    void (async () => {
+      await waitForNegotiationComplete();
+      await handleNavigateToPostMortem();
+    })();
+  }, [endCall, handleNavigateToPostMortem, waitForNegotiationComplete]);
 
   const handleNavigateToPostMortem = useCallback(async () => {
-    setIsUploadModalOpen(false);
-
     // Stop all tracks
     stream?.getTracks().forEach((track) => track.stop());
 
     if (sessionId) {
       try {
-        await requestPostMortem(sessionId);
-      } catch {
-        setMediaError("Failed to request post-mortem analysis.");
+        await requestPostMortemWithRetry();
+      } catch (error) {
+        console.error("Failed to request post-mortem analysis:", error);
       }
     }
     router.push(`/postmortem/${sessionId || "current-session"}`);
-  }, [router, stream, sessionId]);
+  }, [requestPostMortemWithRetry, router, stream, sessionId]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -811,15 +841,6 @@ export function NegotiationClient() {
             <span className="h-2 w-2 rounded-full bg-olive-soft shadow-olive-glow" />
             LIVE
           </div>
-          <div className="absolute right-8 top-16 rounded-full border border-white/10 bg-black/40 px-3 py-2 text-[10px] font-semibold text-white/70 backdrop-blur">
-            <Button
-              type="button"
-              onClick={handleEndSession}
-              className="cursor-pointer"
-            >
-              Debug: end session
-            </Button>
-          </div>
 
           <OpponentOrb
             isThinking={isThinking}
@@ -844,13 +865,6 @@ export function NegotiationClient() {
         />
       </main>
 
-      <UploadModal
-        isOpen={isUploadModalOpen}
-        onClose={handleNavigateToPostMortem}
-        onConfirmUpload={handleUpload}
-        onSkip={handleNavigateToPostMortem}
-        sessionDuration={sessionDuration}
-      />
     </div>
   );
 }

@@ -33,6 +33,22 @@ export type PostMortemResult = {
   keyMoments: PostMortemMoment[];
 };
 
+export type AnalyticsResponse = {
+  session_id: string;
+  analysis: Partial<PostMortemResult> & Record<string, unknown>;
+};
+
+export type VideoSession = {
+  session_id: string;
+  created_at: string;
+};
+
+export type VideoLink = {
+  id: string;
+  link: string;
+  created_at?: string;
+};
+
 const DEFAULT_API_BASE = "http://localhost:8000";
 
 const getApiBaseUrl = () =>
@@ -58,6 +74,32 @@ export async function createScenarioContext(keywords: string) {
   }
 
   return (await response.json()) as ScenarioContext;
+}
+
+export async function createVideoSession(link: string) {
+  const response = await fetch(`${getApiBaseUrl()}/videos/session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ link }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Video session request failed");
+  }
+
+  return (await response.json()) as VideoSession;
+}
+
+export async function fetchVideoLinks() {
+  const response = await fetch(`${getApiBaseUrl()}/videos/links`, {
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error("Video links fetch failed");
+  }
+
+  return (await response.json()) as { videos: VideoLink[] };
 }
 
 export async function requestPostMortem(sessionId: string) {
@@ -89,6 +131,44 @@ export async function fetchPostMortem(sessionId: string) {
   return (await response.json()) as PostMortemResult;
 }
 
+const normalizeAnalytics = (analysis: AnalyticsResponse["analysis"]): PostMortemResult => {
+  const metricsRaw = Array.isArray(analysis.metrics) ? analysis.metrics : [];
+  const keyMomentsRaw = Array.isArray(analysis.keyMoments)
+    ? analysis.keyMoments
+    : Array.isArray((analysis as Record<string, unknown>).key_moments)
+      ? ((analysis as Record<string, unknown>).key_moments as PostMortemMoment[])
+      : [];
+
+  return {
+    overallScore: Number(analysis.overallScore ?? (analysis as Record<string, unknown>).overall_score ?? 0),
+    strengths: Array.isArray(analysis.strengths) ? analysis.strengths : [],
+    improvements: Array.isArray(analysis.improvements) ? analysis.improvements : [],
+    metrics: metricsRaw.map((metric) => ({
+      label: String((metric as PostMortemMetric).label ?? "Metric"),
+      score: Number((metric as PostMortemMetric).score ?? 0),
+      change: Number((metric as PostMortemMetric).change ?? 0),
+    })),
+    keyMoments: keyMomentsRaw.map((moment) => ({
+      time: String((moment as PostMortemMoment).time ?? "--"),
+      desc: String((moment as PostMortemMoment).desc ?? ""),
+      type: ((moment as PostMortemMoment).type ?? "positive") as PostMortemMoment["type"],
+    })),
+  };
+};
+
+export async function fetchAnalytics(sessionId: string) {
+  const response = await fetch(`${getServerApiBaseUrl()}/videos/${sessionId}/analytics`, {
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error("Analytics fetch failed");
+  }
+
+  const data = (await response.json()) as AnalyticsResponse;
+  return normalizeAnalytics(data.analysis ?? {});
+}
+
 // =============================================================================
 // S3 Video Upload Functions
 // =============================================================================
@@ -102,6 +182,8 @@ export type PresignedUrlResponse = {
 export type UploadConfirmResponse = {
   success: boolean;
   video_url: string;
+  is_public: boolean;
+  expires_in?: number;
 };
 
 /**
@@ -168,7 +250,8 @@ export async function uploadVideoToS3(
  */
 export async function confirmVideoUpload(
   sessionId: string,
-  videoKey: string
+  videoKey: string,
+  isPublic: boolean = false
 ): Promise<UploadConfirmResponse> {
   const response = await fetch(`${getApiBaseUrl()}/videos/confirm-upload`, {
     method: "POST",
@@ -176,6 +259,7 @@ export async function confirmVideoUpload(
     body: JSON.stringify({
       session_id: sessionId,
       video_key: videoKey,
+      is_public: isPublic,
     }),
   });
 
@@ -192,6 +276,7 @@ export async function confirmVideoUpload(
 export async function uploadNegotiationVideo(
   sessionId: string,
   videoBlob: Blob,
+  isPublic: boolean = false,
   onProgress?: (progress: number) => void
 ): Promise<string> {
   // Step 1: Get presigned URL
@@ -203,8 +288,8 @@ export async function uploadNegotiationVideo(
   // Step 2: Upload to S3
   await uploadVideoToS3(upload_url, videoBlob, onProgress);
 
-  // Step 3: Confirm upload
-  const { video_url } = await confirmVideoUpload(sessionId, video_key);
+  // Step 3: Confirm upload with public flag
+  const { video_url } = await confirmVideoUpload(sessionId, video_key, isPublic);
 
   return video_url;
 }
@@ -217,7 +302,7 @@ export async function getVideoDownloadUrl(
   expiresIn: number = 3600
 ): Promise<{ download_url: string; expires_in: number }> {
   const response = await fetch(
-    `${getApiBaseUrl()}/videos/download-url/${sessionId}?expires_in=${expiresIn}`
+    `${getServerApiBaseUrl()}/videos/download-url/${sessionId}?expires_in=${expiresIn}`
   );
 
   if (!response.ok) {

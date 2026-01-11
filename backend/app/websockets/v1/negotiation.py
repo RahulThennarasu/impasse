@@ -103,13 +103,16 @@ class NegotiationSession:
 
         # Cartesia client for TTS
         try:
+            cartesia_key = settings.CARTESIA_API_KEY
+            logger.info(f"Cartesia key loaded (settings): {bool(cartesia_key)}")
+            logger.info(f"Cartesia voice id (settings): {settings.CARTESIA_VOICE_ID}")
             if Cartesia:
-                self.cartesia_client = Cartesia(api_key=os.getenv("CARTESIA_API_KEY"))
+                self.cartesia_client = Cartesia(api_key=cartesia_key)
                 self.cartesia_available = True
             else:
                 self.cartesia_client = None
                 self.cartesia_available = False
-                if os.getenv("CARTESIA_API_KEY"):
+                if cartesia_key:
                     logger.warning("Cartesia SDK unavailable - falling back to HTTP TTS")
                 else:
                     logger.warning("Cartesia API key missing - TTS will be disabled")
@@ -573,7 +576,8 @@ class NegotiationSession:
             })
 
     async def _cartesia_sse_stream(self, text: str, model_id: str, voice_id: str, output_format: dict):
-        api_key = os.getenv("CARTESIA_API_KEY")
+        api_key = settings.CARTESIA_API_KEY
+
         if not api_key:
             return
         base_url = os.getenv("CARTESIA_BASE_URL", "https://api.cartesia.ai")

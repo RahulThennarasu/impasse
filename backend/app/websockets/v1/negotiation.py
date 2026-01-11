@@ -851,11 +851,16 @@ async def create_scenario_context(payload: ScenarioContextRequest):
         role = (scenario.get("role") or "Participant")
         description = scenario.get("description") or scenario.get("user_narrative") or ""
 
+        # Return full scenario data including opponent and coach configs
         return {
             "title": title,
             "role": role,
             "description": description,
-            "agent_id": "opponent"
+            "agent_id": "opponent",
+            # Include full configs for WebSocket initialization
+            "opponent": scenario.get("opponent_agent_config", {}),
+            "coach": scenario.get("coach_agent_config", {}),
+            "user_briefing": scenario.get("user_briefing", {}),
         }
     except Exception as e:
         logger.error(f"Scenario generation failed: {e}")

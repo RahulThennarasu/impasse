@@ -1,8 +1,33 @@
+export type OpponentConfig = {
+  context?: string;
+  counterparty_name?: string;
+  counterparty_objectives?: string;
+  counterparty_interests?: string;
+  batna?: string;
+  constraints?: string[];
+  information_asymmetries?: string;
+  disposition?: string;
+  personality?: string;
+};
+
+export type CoachConfig = {
+  user_objectives?: string;
+  user_batna?: string;
+  points_of_tension?: string;
+  negotiable_items?: string;
+  success_criteria?: string;
+  info_asymmetries?: string;
+};
+
 export type ScenarioContext = {
   title: string;
   role: string;
   description: string;
   agent_id?: string;
+  // Full configs for agents (returned from backend)
+  opponent?: OpponentConfig;
+  coach?: CoachConfig;
+  user_briefing?: Record<string, unknown>;
 };
 
 export type CoachTip = {

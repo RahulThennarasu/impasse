@@ -26,7 +26,8 @@ export function LibraryClient() {
 
   useEffect(() => {
     setUserLoading(true);
-    fetchVideoLinks()
+    const userId = getUserId();
+    fetchVideoLinks(userId)
       .then((response) => {
         setUserSessions(response.videos ?? []);
         setUserError(null);

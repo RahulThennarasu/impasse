@@ -286,6 +286,38 @@ class NegotiationSession:
         ]
         return any(phrase in lowered for phrase in closing_phrases)
 
+    def _is_walkaway(self, opponent_response: str) -> bool:
+        """Check if opponent's response indicates they are walking away from the negotiation."""
+        lowered = opponent_response.lower()
+        # Phrases indicating opponent is walking away
+        walkaway_phrases = [
+            "walk away",
+            "walking away",
+            "have to pass",
+            "going to pass",
+            "i'll pass",
+            "i'm going to have to pass",
+            "not going to work",
+            "isn't going to work",
+            "can't make this work",
+            "too far apart",
+            "explore other options",
+            "other options that work better",
+            "pursue other opportunities",
+            "look elsewhere",
+            "end this conversation",
+            "we're done here",
+            "i'm done",
+            "this conversation is over",
+            "not interested anymore",
+            "no longer interested",
+            "withdrawing my offer",
+            "rescind my offer",
+            "off the table",
+            "taking my business elsewhere",
+        ]
+        return any(phrase in lowered for phrase in walkaway_phrases)
+
     def _get_closing_message(self) -> str:
         """Generate a brief closing message from the opponent."""
         closing_messages = [
@@ -391,6 +423,33 @@ class NegotiationSession:
                 })
                 self.closed = True
                 # Don't close websocket here - let frontend handle cleanup after audio plays
+                return
+
+            # Check if opponent walked away from the negotiation
+            if self._is_walkaway(opponent_response):
+                logger.info(f"Session {self.session_id}: Opponent walked away from negotiation")
+                final_advice = self.coach.get_final_advice(self.opponent.transcript)
+                hidden_state = self.opponent.get_hidden_state()
+
+                # Store session data for post-mortem analysis
+                store_session_data(self.session_id, {
+                    "transcript": self.opponent.transcript,
+                    "opponent_config": self.scenario_data.get("opponent", {}),
+                    "coach_config": self.scenario_data.get("coach", {}),
+                    "hidden_state": hidden_state,
+                    "final_advice": final_advice,
+                })
+
+                # Send negotiation complete with walkaway flag
+                await self.websocket.send_json({
+                    "type": "negotiation_complete",
+                    "final_advice": final_advice,
+                    "hidden_state": hidden_state,
+                    "transcript": self.opponent.transcript,
+                    "auto_ended": True,
+                    "walked_away": True
+                })
+                self.closed = True
                 return
 
             # Coach tips: show after the first opponent reply for the next 3 turns,
@@ -816,6 +875,7 @@ async def update_negotiation_scenario_info(session_id: str, scenario_info: str):
 class VideoSessionRequest(BaseModel):
     """Request model for creating a new video session"""
     link: str
+    user_id: Optional[str] = None
 
 
 class VideoSessionResponse(BaseModel):
@@ -837,15 +897,19 @@ class VideoTitleUpdate(BaseModel):
 async def create_video_session(request: VideoSessionRequest):
     """
     Register a new video session in the Supabase table.
-    
+
     Returns the newly created session ID.
     """
     try:
         supabase = get_supabase_client()
-        
-        # Generate a new UUID for the session
-        # session_id = str(uuid.uuid4())
-        
+
+        # Build insert data with optional user_id
+        insert_data = {"link": request.link}
+        if request.user_id:
+            insert_data["user_id"] = request.user_id
+
+        logger.info(f"Creating video session with data: {insert_data}")
+
         # Insert the new video session into the database
         response = supabase.table("recordings").insert({
             # "id": session_id,
@@ -854,9 +918,9 @@ async def create_video_session(request: VideoSessionRequest):
         }).execute()
         # print("Response data", response.data)
         session_id = response.data[0].get("id")
-        
-        # logger.info(f"Created video session: {session_id}")
-        
+
+        logger.info(f"Created video session: {session_id} for user: {request.user_id}")
+
         # Extract created_at from the response
         if response.data and len(response.data) > 0 and response.data[0]:
             created_at = response.data[0].get("created_at", "")
@@ -864,14 +928,14 @@ async def create_video_session(request: VideoSessionRequest):
                 session_id=session_id,
                 created_at=created_at
             )
-        
+
         return VideoSessionResponse(
             session_id=session_id,
             created_at=""
         )
-        
+
     except Exception as e:
-        logger.error(f"Failed to create video session: {e}")
+        logger.error(f"Failed to create video session: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Failed to create video session"
@@ -881,9 +945,15 @@ async def create_video_session(request: VideoSessionRequest):
 @negotiation_router.get("/videos/links", response_model=VideoLinksResponse)
 async def get_all_video_links(public_only: bool = False):
     """
-    Retrieve all video links from the Supabase videos table.
-    
-    Returns a list of all video records with their uuid, link, and created_at.
+    Retrieve video links from the Supabase recordings table.
+
+    If user_id is provided, returns only recordings for that user.
+    Otherwise, returns all recordings (for backwards compatibility).
+
+    Args:
+        user_id: Optional user ID to filter recordings by
+
+    Returns a list of video records with their id, link, and created_at.
     """
     try:
         supabase = get_supabase_client()
@@ -899,9 +969,9 @@ async def get_all_video_links(public_only: bool = False):
         return VideoLinksResponse(
             videos=response.data
         )
-        
+
     except Exception as e:
-        logger.error(f"Failed to retrieve video links: {e}")
+        logger.error(f"Failed to retrieve video links: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Failed to retrieve video links"

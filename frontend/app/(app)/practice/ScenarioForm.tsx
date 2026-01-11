@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createScenarioContext, createVideoSession, type ScenarioContext } from "@/lib/api";
+import { getUserId } from "@/lib/user";
 
 export function ScenarioForm() {
   const router = useRouter();
@@ -28,7 +29,8 @@ export function ScenarioForm() {
   const handleStart = () => {
     if (!scenario) return;
     const agentId = scenario.agent_id ?? "opponent";
-    createVideoSession("pending")
+    const userId = getUserId();
+    createVideoSession("pending", userId)
       .then((videoSession) => {
         const sessionId = videoSession.session_id;
         sessionStorage.setItem(`scenario:${sessionId}`, JSON.stringify(scenario));

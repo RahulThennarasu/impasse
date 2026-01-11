@@ -106,5 +106,15 @@ The user_narrative MUST mention key numbers upfront (e.g., "You're currently at 
 Both briefings should include specific figures in objectives, constraints, BATNA, and success_criteria.
 Numbers should be realistic for the domain and create meaningful negotiation ranges (not too wide, not too narrow).
 
+OPPONENT WALKAWAY CAPABILITY:
+The opponent has a real BATNA and can walk away from the negotiation if pushed too far. Design scenarios where:
+- The opponent's BATNA is credible and specific (not vague)
+- There are clear "red lines" or non-negotiables that, if violated repeatedly, could cause walkaway
+- The opponent's walkaway threshold is realistic but not too easy to trigger
+- Include in tactics_to_use: conditions under which they would consider walking away
+- The opponent should give warnings before walking away (e.g., "I'm not sure we can make this work...")
+
+This creates realistic pressure and teaches users that negotiations can fail if they push too hard or ignore the other party's constraints.
+
 INPUT: {context}
 """.strip()

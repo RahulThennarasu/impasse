@@ -79,11 +79,16 @@ export async function createScenarioContext(keywords: string) {
   return (await response.json()) as ScenarioContext;
 }
 
-export async function createVideoSession(link: string) {
+export async function createVideoSession(link: string, userId?: string) {
+  const body: { link: string; user_id?: string } = { link };
+  if (userId) {
+    body.user_id = userId;
+  }
+
   const response = await fetch(`${getApiBaseUrl()}/videos/session`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ link }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {

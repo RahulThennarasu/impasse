@@ -69,6 +69,7 @@ class OpponentAgent:
         self.transcript = []
         self.revealed_info = []
         self.current_turn = 0
+        self.user_price_anchor = None
 
         # Build system prompt
         self.system_prompt = self._build_system_prompt()
@@ -238,11 +239,22 @@ CLOSING (only when truly aligned):
             "turn": self.current_turn
         })
 
+        if self._user_provided_price(user_message):
+            self.user_price_anchor = user_message
+
         # Use recent history for context (configurable, default higher for better continuity)
         recent_transcript = self.transcript[-self.max_history_messages:] if self.max_history_messages > 0 else self.transcript
 
         # Build messages for LLM: system prompt + conversation history (only role and content)
         messages = [{"role": "system", "content": self.system_prompt}]
+        if self.user_price_anchor:
+            messages.append({
+                "role": "system",
+                "content": (
+                    "The user has already stated their target price or range. "
+                    f"Do NOT ask for their target again. Their stated target: {self.user_price_anchor}"
+                ),
+            })
         for entry in recent_transcript:
             messages.append({"role": entry["role"], "content": entry["content"]})
 
@@ -262,6 +274,25 @@ CLOSING (only when truly aligned):
             "turn": self.current_turn
         })
         return opponent_response
+
+    def _user_provided_price(self, user_message: str) -> bool:
+        lower = user_message.lower()
+        if any(phrase in lower for phrase in [
+            "not sure",
+            "no idea",
+            "i don't know",
+            "i do not know",
+        ]):
+            return False
+        money_keywords = [
+            "dollar",
+            "thousand",
+            "million",
+            "hundred",
+            "range",
+            "between",
+        ]
+        return any(keyword in lower for keyword in money_keywords)
 
     def _create_completion(self, model: str, messages: List[Dict[str, str]], temperature: float, max_tokens: int):
         try:

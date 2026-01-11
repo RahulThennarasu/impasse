@@ -875,6 +875,7 @@ async def update_negotiation_scenario_info(session_id: str, scenario_info: str):
 class VideoSessionRequest(BaseModel):
     """Request model for creating a new video session"""
     link: str
+    user_id: Optional[str] = None
 
 
 class VideoSessionResponse(BaseModel):
@@ -892,25 +893,25 @@ class VideoLinksResponse(BaseModel):
 async def create_video_session(request: VideoSessionRequest):
     """
     Register a new video session in the Supabase table.
-    
+
     Returns the newly created session ID.
     """
     try:
         supabase = get_supabase_client()
-        
-        # Generate a new UUID for the session
-        # session_id = str(uuid.uuid4())
-        
+
+        # Build insert data with optional user_id
+        insert_data = {"link": request.link}
+        if request.user_id:
+            insert_data["user_id"] = request.user_id
+
+        logger.info(f"Creating video session with data: {insert_data}")
+
         # Insert the new video session into the database
-        response = supabase.table("recordings").insert({
-            # "id": session_id,
-            "link": request.link
-        }).execute()
-        # print("Response data", response.data)
+        response = supabase.table("recordings").insert(insert_data).execute()
         session_id = response.data[0].get("id")
-        
-        # logger.info(f"Created video session: {session_id}")
-        
+
+        logger.info(f"Created video session: {session_id} for user: {request.user_id}")
+
         # Extract created_at from the response
         if response.data and len(response.data) > 0 and response.data[0]:
             created_at = response.data[0].get("created_at", "")
@@ -918,14 +919,14 @@ async def create_video_session(request: VideoSessionRequest):
                 session_id=session_id,
                 created_at=created_at
             )
-        
+
         return VideoSessionResponse(
             session_id=session_id,
             created_at=""
         )
-        
+
     except Exception as e:
-        logger.error(f"Failed to create video session: {e}")
+        logger.error(f"Failed to create video session: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Failed to create video session"
@@ -933,26 +934,39 @@ async def create_video_session(request: VideoSessionRequest):
 
 
 @negotiation_router.get("/videos/links", response_model=VideoLinksResponse)
-async def get_all_video_links():
+async def get_all_video_links(user_id: Optional[str] = None):
     """
-    Retrieve all video links from the Supabase videos table.
-    
-    Returns a list of all video records with their uuid, link, and created_at.
+    Retrieve video links from the Supabase recordings table.
+
+    If user_id is provided, returns only recordings for that user.
+    Otherwise, returns all recordings (for backwards compatibility).
+
+    Args:
+        user_id: Optional user ID to filter recordings by
+
+    Returns a list of video records with their id, link, and created_at.
     """
     try:
         supabase = get_supabase_client()
-        
-        # Fetch all video records from the database
-        response = supabase.table("recordings").select("*").execute()
-        
-        logger.info(f"Retrieved {len(response.data)} video records")
+
+        logger.info(f"Fetching video links for user_id: {user_id}")
+
+        # Build query - filter by user_id if provided
+        query = supabase.table("recordings").select("*")
+        if user_id:
+            query = query.eq("user_id", user_id)
+
+        # Order by created_at descending to show newest first
+        response = query.order("created_at", desc=True).execute()
+
+        logger.info(f"Retrieved {len(response.data)} video records for user_id: {user_id}")
 
         return VideoLinksResponse(
             videos=response.data
         )
-        
+
     except Exception as e:
-        logger.error(f"Failed to retrieve video links: {e}")
+        logger.error(f"Failed to retrieve video links: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Failed to retrieve video links"

@@ -47,6 +47,7 @@ export type VideoLink = {
   id: string;
   link: string;
   created_at?: string;
+  user_id?: string;
 };
 
 const DEFAULT_API_BASE = "http://localhost:8000";
@@ -76,11 +77,16 @@ export async function createScenarioContext(keywords: string) {
   return (await response.json()) as ScenarioContext;
 }
 
-export async function createVideoSession(link: string) {
+export async function createVideoSession(link: string, userId?: string) {
+  const body: { link: string; user_id?: string } = { link };
+  if (userId) {
+    body.user_id = userId;
+  }
+
   const response = await fetch(`${getApiBaseUrl()}/videos/session`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ link }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -90,8 +96,13 @@ export async function createVideoSession(link: string) {
   return (await response.json()) as VideoSession;
 }
 
-export async function fetchVideoLinks() {
-  const response = await fetch(`${getApiBaseUrl()}/videos/links`, {
+export async function fetchVideoLinks(userId?: string) {
+  let url = `${getApiBaseUrl()}/videos/links`;
+  if (userId) {
+    url += `?user_id=${encodeURIComponent(userId)}`;
+  }
+
+  const response = await fetch(url, {
     cache: "no-store",
   });
 

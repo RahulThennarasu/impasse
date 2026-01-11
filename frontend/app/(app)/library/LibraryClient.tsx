@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Eye, Search, Users } from "lucide-react";
 import { Tab } from "@headlessui/react";
 import { fetchVideoLinks, type VideoLink } from "@/lib/api";
+import { getUserId } from "@/lib/user";
 
 const publicNegotiations = [
   {
@@ -98,7 +99,8 @@ export function LibraryClient() {
 
   useEffect(() => {
     setUserLoading(true);
-    fetchVideoLinks()
+    const userId = getUserId();
+    fetchVideoLinks(userId)
       .then((response) => {
         setUserSessions(response.videos ?? []);
         setUserError(null);

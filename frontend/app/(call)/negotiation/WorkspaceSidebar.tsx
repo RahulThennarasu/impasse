@@ -2,19 +2,12 @@
 
 import { Button, Disclosure, Tab } from "@headlessui/react";
 import { Lightbulb, Minimize2, StickyNote } from "lucide-react";
-
-type CoachSuggestion = {
-  id: number;
-  text: string;
-  time: string;
-  priority: "high" | "medium";
-  category: string;
-};
+import type { CoachTip } from "@/lib/api";
 
 type WorkspaceSidebarProps = {
   isSidebarOpen: boolean;
   onClose: () => void;
-  coachSuggestions: CoachSuggestion[];
+  coachSuggestions: CoachTip[];
   notes: string;
 };
 
@@ -96,6 +89,8 @@ export function WorkspaceSidebar({
                             className={`rounded-full px-3 py-1 text-xs font-semibold ${
                               suggestion.priority === "high"
                                 ? "bg-ink text-white"
+                                : suggestion.priority === "medium"
+                                ? "bg-black/10 text-ink"
                                 : "bg-black/5 text-muted"
                             }`}
                           >

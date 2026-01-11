@@ -663,6 +663,18 @@ export function NegotiationClient() {
     }
   }, [phase]);
 
+  // When ended, show a loading state while navigating to post-mortem
+  if (phase === "ended") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-night text-white">
+        <div className="text-center">
+          <div className="text-lg font-semibold">Preparing your analysis...</div>
+          <p className="mt-2 text-sm text-white/60">Redirecting to post-mortem review</p>
+        </div>
+      </div>
+    );
+  }
+
   if (phase !== "call") {
     return (
       <div className="relative min-h-screen bg-night text-white">

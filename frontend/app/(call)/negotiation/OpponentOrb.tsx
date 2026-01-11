@@ -77,7 +77,9 @@ export function OpponentOrb({
       const delta = time - (lastMotionTimeRef.current ?? time);
       lastMotionTimeRef.current = time;
       const baseSpeed = 0.001;
-      const smooth = audioSmoothRef.current + (audioTargetRef.current - audioSmoothRef.current) * 0.08;
+      const smooth =
+        audioSmoothRef.current +
+        (audioTargetRef.current - audioSmoothRef.current) * 0.08;
       audioSmoothRef.current = smooth;
       const audioBoost = smooth * 0.002;
       const step = delta * (baseSpeed + audioBoost);
@@ -96,7 +98,7 @@ export function OpponentOrb({
   }, []);
 
   return (
-    <div className="absolute left-8 top-24 flex flex-col items-start gap-3">
+    <div className="absolute left-8 top-8 flex flex-col items-start gap-3">
       <div className="relative h-28 w-28 overflow-hidden rounded-full bg-black/90">
         <div
           className="absolute inset-0 rounded-full bg-olive-20 blur-2xl"

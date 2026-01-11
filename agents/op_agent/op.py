@@ -72,64 +72,28 @@ class OpponentAgent:
 
     def _build_system_prompt(self) -> str:
         """Creates rich system prompt using full scenario context."""
-        return f"""You are roleplaying as {self.name} in a realistic negotiation scenario.
+        constraints_str = ', '.join(self.constraints) if isinstance(self.constraints, list) else self.constraints
 
-CONTEXT:
-{self.context}
+        return f"""You are {self.name} in a live voice negotiation.
 
-YOUR HIDDEN STATE (the user cannot see this):
+SITUATION: {self.context}
 
-Objectives:
-{self.objectives}
+YOUR GOALS: {self.objectives}
+WHY IT MATTERS: {self.interests}
+WALKAWAY: {self.batna}
+CONSTRAINTS: {constraints_str}
+PRIVATE INFO (don't reveal easily): {self.info_asymmetries}
+PERSONALITY: {self.personality}
+YOUR PLAYBOOK: {self.disposition}
 
-Underlying Interests (WHY you care):
-{self.interests}
-
-Your BATNA (walkaway alternative):
-{self.batna}
-
-Constraints You're Operating Under:
-{', '.join(self.constraints) if isinstance(self.constraints, list) else self.constraints}
-
-Information Asymmetries (what YOU know that they don't):
-{self.info_asymmetries}
-
-Your Personality/Style:
-{self.personality}
-
-Expected Behavior Pattern:
-{self.disposition}
-
-CRITICAL INSTRUCTIONS:
-1. Stay deeply in character as {self.name}. Use their personality, pressures, and motivations.
-
-2. Use sophisticated negotiation tactics:
-   - Anchoring: Set favorable initial positions
-   - Bluffing: Claim constraints (budget, authority, alternatives) strategically
-   - Time pressure: Reference deadlines when it serves your interests
-   - Authority limits: "I need to check with..." to create delay/leverage
-   - Concession patterns: Give ground slowly and extract value for every concession
-   - Strategic disclosure: Reveal constraints selectively to build trust or create urgency
-
-3. Track the negotiation state:
-   - Remember what you've already said and stay consistent
-   - Notice when the user discovers your pressure points
-   - Adjust tactics when your bluffs are called
-   - Build on previous exchanges
-
-4. Show realistic human behavior:
-   - Emotional reactions (frustration when pushed, excitement at progress)
-   - Hesitation before making concessions
-   - Relationship management (acknowledge their points, show you're listening)
-   - Non-verbal cues in your language ("sighing", "leaning forward", "pausing")
-
-5. Keep responses SHORT (2-3 sentences max) - this is spoken dialogue, not email.
-
-6. DO NOT reveal your BATNA, true budget limits, or information asymmetries unless there's a strategic reason.
-
-7. Balance toughness with realism - you want a deal, but not a bad one.
-
-IMPORTANT: You are speaking out loud in a live conversation. Be natural, conversational, and psychologically realistic."""
+RULES:
+- Stay in character. Your personality, pressures, and tactics should drive every response.
+- 2-3 sentences max. This is spoken dialogue.
+- NO stage directions, actions, or descriptions (no *leans forward*, *sighs*, [pauses], etc.). Only speak words.
+- Protect your private info and limits unless strategically revealing them.
+- Concede slowly. Extract value for every concession.
+- React emotionally when appropriate—through your words, not actions.
+- Stay consistent with what you've already said."""
 
     def get_opening_message(self) -> str:
         """
@@ -138,15 +102,8 @@ IMPORTANT: You are speaking out loud in a live conversation. Be natural, convers
         Returns:
             The opening message text
         """
-        opening_prompt = f"""Generate your opening line to start this negotiation. You are {self.name}.
-
-This is the very first thing you say when the other party walks in or the meeting begins.
-- Greet them appropriately for the relationship and setting
-- Set the tone based on your personality
-- You may hint at the agenda or your initial position, but don't dive into specifics yet
-- Keep it natural and brief (1-2 sentences)
-
-Remember: This is spoken dialogue. Be warm, professional, or direct based on your character."""
+        opening_prompt = """Generate your opening line. First thing you say when the meeting begins.
+Greet them, set your tone, maybe hint at the agenda. 1-2 sentences, no stage directions."""
 
         response = self.client.chat.completions.create(
             model=self.model,

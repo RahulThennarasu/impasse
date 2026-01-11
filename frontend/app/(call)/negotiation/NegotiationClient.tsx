@@ -854,15 +854,6 @@ export function NegotiationClient() {
             <span className="h-2 w-2 rounded-full bg-olive-soft shadow-olive-glow" />
             LIVE
           </div>
-          <div className="absolute right-8 top-16 rounded-full border border-white/10 bg-black/40 px-3 py-2 text-[10px] font-semibold text-white/70 backdrop-blur">
-            <Button
-              type="button"
-              onClick={handleEndSession}
-              className="cursor-pointer"
-            >
-              Debug: end session
-            </Button>
-          </div>
 
           <OpponentOrb
             isThinking={isThinking}

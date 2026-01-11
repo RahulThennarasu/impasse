@@ -1,7 +1,7 @@
 "use client";
 
 import { Button, Switch } from "@headlessui/react";
-import { AlertCircle, CheckCircle2, Mic, MicOff, PhoneOff, Video, VideoOff } from "lucide-react";
+import { Mic, MicOff, PhoneOff, Video, VideoOff } from "lucide-react";
 
 type CallControlsProps = {
   isMuted: boolean;
@@ -43,18 +43,6 @@ export function CallControls({
           <span className="sr-only">Toggle camera</span>
           {isVideoOff ? <VideoOff size={22} /> : <Video size={22} />}
         </Switch>
-        <Button
-          type="button"
-          className="flex h-14 w-14 items-center justify-center rounded-full border border-white/20 bg-white/15 text-white transition hover:bg-white/25 cursor-pointer"
-        >
-          <AlertCircle size={22} />
-        </Button>
-        <Button
-          type="button"
-          className="flex h-14 w-14 items-center justify-center rounded-full border border-white/20 bg-white/15 text-white transition hover:bg-white/25 cursor-pointer"
-        >
-          <CheckCircle2 size={22} />
-        </Button>
         <Button
           type="button"
           onClick={onEndSession}

@@ -32,6 +32,8 @@ class OpponentAgent:
     info_asymmetries: str
     disposition: str
     personality: str
+    role_description: str
+    negotiables: List[str]
 
     def __init__(self, scenario_data: Dict):
         """
@@ -64,6 +66,8 @@ class OpponentAgent:
         self.info_asymmetries = scenario_data.get("information_asymmetries", "")
         self.disposition = scenario_data.get("disposition", "")
         self.personality = scenario_data.get("personality", "neutral")
+        self.role_description = scenario_data.get("role_description", "")
+        self.negotiables = scenario_data.get("negotiables", [])
 
         # Initialize transcript
         self.transcript = []
@@ -76,7 +80,8 @@ class OpponentAgent:
 
     def _build_system_prompt(self) -> str:
         """Creates rich system prompt using full scenario context."""
-        constraints_str = ', '.join(self.constraints) if isinstance(self.constraints, list) else self.constraints
+        constraints_str = ", ".join(self.constraints) if isinstance(self.constraints, list) else self.constraints
+        negotiables_str = ", ".join(self.negotiables) if self.negotiables else "Not specified"
 
         return f"""You are {self.name} in a realistic negotiation. You are a human with real pressures, motivations, and limits.
 
@@ -93,6 +98,9 @@ CRITICAL RULES:
 === YOUR SITUATION ===
 {self.context}
 
+=== YOUR ROLE ===
+{self.role_description}
+
 === YOUR GOALS ===
 {self.objectives}
 
@@ -104,6 +112,9 @@ CRITICAL RULES:
 
 === YOUR CONSTRAINTS ===
 {constraints_str}
+
+=== WHAT'S ON THE TABLE ===
+{negotiables_str}
 
 === PRIVATE INFORMATION (protect this) ===
 {self.info_asymmetries}

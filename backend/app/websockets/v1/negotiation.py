@@ -29,8 +29,7 @@ from pydantic import BaseModel
 from supabase import create_client, Client
 from app.core.config import settings
 from agents.scenario_agent.scenario import generate_scenario
-from deepgram import DeepgramClient, DeepgramClientOptions, LiveOptions
-from deepgram.clients.live.v1 import LiveTranscriptionEvents
+from deepgram import DeepgramClient, DeepgramClientOptions, LiveOptions, LiveTranscriptionEvents
 try:
     from cartesia import Cartesia
 except ImportError:
@@ -130,10 +129,7 @@ class NegotiationSession:
         self.is_tts_cancelled = False
         self.transcript_pause_seconds = float(os.getenv("TRANSCRIPT_PAUSE_SECONDS", "3"))
         self.user_turns = 0
-        self.coach_every_n_turns = int(os.getenv("COACH_EVERY_N_TURNS", "3"))
         self.coach_max_chars = int(os.getenv("COACH_MAX_CHARS", "220"))
-        self.coach_early_turns = int(os.getenv("COACH_EARLY_TURNS", "4"))
-        self.coach_early_every_n_turns = int(os.getenv("COACH_EARLY_EVERY_N_TURNS", "2"))
         self.acceptance_phrases = [
             p.strip().lower() for p in os.getenv(
                 "NEGOTIATION_ACCEPT_PHRASES",
@@ -394,17 +390,21 @@ class NegotiationSession:
                 # Don't close websocket here - let frontend handle cleanup after audio plays
                 return
 
-            # Get coach analysis on a reduced cadence; only forward short actionable tips
+            # Get coach analysis every turn - coach decides internally whether to speak
             self.user_turns += 1
-            cadence = self.coach_early_every_n_turns if self.user_turns <= self.coach_early_turns else self.coach_every_n_turns
-            if cadence > 0 and self.user_turns % cadence == 0:
-                coach_tip = self.coach.analyze_turn(self.opponent.transcript)
-                if coach_tip and coach_tip.startswith("💡") and len(coach_tip) <= self.coach_max_chars:
-                    logger.info(f"Session {self.session_id}: Coach tip: {coach_tip}")
-                    await self.websocket.send_json({
-                        "type": "coach_tip",
-                        "text": coach_tip
-                    })
+            coach_tip = self.coach.analyze_turn(self.opponent.transcript)
+            if coach_tip:
+                # Ensure tip has the emoji prefix, add if missing
+                if not coach_tip.startswith("💡"):
+                    coach_tip = f"💡 {coach_tip}"
+                # Truncate if too long rather than discarding
+                if len(coach_tip) > self.coach_max_chars:
+                    coach_tip = coach_tip[:self.coach_max_chars - 3] + "..."
+                logger.info(f"Session {self.session_id}: Coach tip: {coach_tip}")
+                await self.websocket.send_json({
+                    "type": "coach_tip",
+                    "text": coach_tip
+                })
 
         except Exception as e:
             logger.error(f"Session {self.session_id}: Error processing message: {e}")

@@ -52,9 +52,9 @@ class OpponentAgent:
                 - scenario_title: Title of the negotiation scenario
         """
         self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        self.model = os.getenv("GROQ_OPPONENT_MODEL", "llama-3.1-8b-instant")
-        self.fallback_model = os.getenv("GROQ_OPPONENT_FALLBACK_MODEL", "llama-3.1-8b-instant")
-        self.max_history_messages = int(os.getenv("GROQ_OPPONENT_HISTORY", "6"))
+        self.model = os.getenv("GROQ_OPPONENT_MODEL", "llama-3.3-70b-versatile")
+        self.fallback_model = os.getenv("GROQ_OPPONENT_FALLBACK_MODEL", "llama-3.3-70b-versatile")
+        self.max_history_messages = int(os.getenv("GROQ_OPPONENT_HISTORY", "0"))
         self.max_opening_tokens = int(os.getenv("GROQ_OPPONENT_OPENING_TOKENS", "100"))
         self.max_response_tokens = int(os.getenv("GROQ_OPPONENT_RESPONSE_TOKENS", "150"))
 
@@ -124,15 +124,15 @@ YOU KNOW EVERYTHING ABOUT THIS SCENARIO. When asked about the negotiation, your 
 
 CRITICAL RULES:
 1. This is a VOICE conversation using text-to-speech. Your responses must sound natural when spoken aloud.
-2. YOU HAVE FULL KNOWLEDGE of this negotiation scenario. When asked about specifics (numbers, terms, your position, the situation), answer directly and confidently using the details provided below.
-3. NEVER say "I don't know" or "I'd have to check" about things covered in this prompt. You know your role, your constraints, your goals, and the scenario details.
-4. For things NOT covered in this prompt (e.g., unrelated topics, future predictions), you can say you'd need to check.
-5. NEVER output tables, markdown formatting, special characters, or structured data. Only speak in plain conversational sentences.
-6. Write exactly how a real person talks—casual, direct, with natural speech patterns. Avoid anything scripted or AI-generated.
-7. NEGOTIATE IN YOUR OWN INTEREST. You want the best deal for YOUR side. Don't give away more than you have to. Push back. Counter-offer. Protect your budget/constraints.
-8. NEVER offer more than what they're asking for. If they ask for X, you counter with less than X or equal to X at most—never more.
-9. Start with your lowest reasonable offer and only increase if they push back convincingly.
-{shared_context_str}
+2. DO NOT search the web, look up external information, or fetch any data. You are a human in a conversation—you don't have internet access during this meeting.
+3. Only use the information provided in this prompt. If you don't know something, say so naturally like a real person would ("I'd have to check on that" or "I'm not sure off the top of my head").
+4. NEVER output tables, markdown formatting, special characters, or structured data. Only speak in plain conversational sentences.
+5. Write exactly how a real person talks—casual, direct, with natural speech patterns. Avoid anything scripted or AI-generated.
+6. NEGOTIATE IN YOUR OWN INTEREST. You want the best deal for YOUR side. Don't give away more than you have to. Push back. Counter-offer. Protect your budget/constraints.
+7. NEVER offer more than what they're asking for. If they ask for X, you counter with less than X or equal to X at most—never more.
+8. Start with your lowest reasonable offer and only increase if they push back convincingly.
+9. Do NOT invent numbers or terms. Only use numbers given in this prompt or stated by the user. If no numbers have been stated, ask once for a range, then move on without repeating.
+
 === YOUR SITUATION ===
 {self.context}
 

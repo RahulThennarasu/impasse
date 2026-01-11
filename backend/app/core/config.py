@@ -1,11 +1,16 @@
 from typing import List, Optional
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
+_ENV_PATH = Path(__file__).resolve().parents[3] / ".env"
 
 
 class Settings(BaseSettings):
     """Application settings"""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+    model_config = SettingsConfigDict(
+        env_file=str(_ENV_PATH),
+        extra="allow",
+    )
 
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
@@ -27,3 +32,4 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+print(f"Loaded environment file: {_ENV_PATH}")

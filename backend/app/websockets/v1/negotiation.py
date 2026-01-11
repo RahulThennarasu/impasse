@@ -47,7 +47,8 @@ negotiation_router = APIRouter()
 
 def get_supabase_client() -> Client:
     """Initialize and return a Supabase client"""
-    if not settings.SUPABASE_URL or not settings.SUPABASE_API_KEY:
+    supabase_key = settings.SUPABASE_SERVICE_ROLE_KEY or settings.SUPABASE_API_KEY
+    if not settings.SUPABASE_URL or not supabase_key:
         raise HTTPException(
             status_code=500,
             detail="Supabase credentials not configured"
@@ -60,7 +61,7 @@ def get_supabase_client() -> Client:
             detail=f"Supabase client unavailable: {e}"
         )
 
-    return create_client(settings.SUPABASE_URL, settings.SUPABASE_API_KEY)
+    return create_client(settings.SUPABASE_URL, supabase_key)
 
 
 class NegotiationSession:

@@ -129,6 +129,7 @@ class NegotiationSession:
         self.is_tts_cancelled = False
         self.transcript_pause_seconds = float(os.getenv("TRANSCRIPT_PAUSE_SECONDS", "3"))
         self.user_turns = 0
+        self.opponent_turns = 0
         self.coach_max_chars = int(os.getenv("COACH_MAX_CHARS", "220"))
         self.acceptance_phrases = [
             p.strip().lower() for p in os.getenv(
@@ -363,6 +364,8 @@ class NegotiationSession:
             # Generate audio from opponent response
             await self.generate_and_stream_audio(opponent_response)
 
+            self.opponent_turns += 1
+
             # Check if opponent closed the deal
             if self._is_deal_closed(opponent_response):
                 logger.info(f"Session {self.session_id}: Deal closed by opponent")
@@ -390,10 +393,24 @@ class NegotiationSession:
                 # Don't close websocket here - let frontend handle cleanup after audio plays
                 return
 
-            # Get coach analysis every turn - coach decides internally whether to speak
+            # Coach tips: show after the first opponent reply for the next 3 turns,
+            # then only surface critical guidance.
             self.user_turns += 1
             coach_tip = self.coach.analyze_turn(self.opponent.transcript)
+            is_early_window = 2 <= self.opponent_turns <= 4
+            is_critical = False
             if coach_tip:
+                upper_tip = coach_tip.upper()
+                is_critical = any(keyword in upper_tip for keyword in [
+                    "CRITICAL",
+                    "IMPORTANT",
+                    "MAJOR",
+                    "MISTAKE",
+                    "DON'T",
+                    "DO NOT",
+                ])
+
+            if coach_tip and (is_early_window or is_critical):
                 # Ensure tip has the emoji prefix, add if missing
                 if not coach_tip.startswith("💡"):
                     coach_tip = f"💡 {coach_tip}"

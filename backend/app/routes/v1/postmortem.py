@@ -10,6 +10,7 @@ Provides REST endpoints to:
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Dict, List, Optional, Any
+from datetime import datetime
 import logging
 import sys
 import os
@@ -136,7 +137,12 @@ def get_session_data(session_id: str) -> Optional[Dict]:
     return _session_store.get(session_id)
 
 
-def transform_to_frontend_format(analysis: Dict, final_advice: Optional[str] = None) -> Dict:
+def transform_to_frontend_format(
+    analysis: Dict,
+    final_advice: Optional[str] = None,
+    previous_analysis: Optional[Dict] = None,
+    transcript: Optional[List[Dict]] = None,
+) -> Dict:
     """
     Transform PostMortemAgent output to frontend-compatible format.
 
@@ -232,13 +238,23 @@ def transform_to_frontend_format(analysis: Dict, final_advice: Optional[str] = N
     # Build metrics based on analysis
     # These are inferred from the analysis content
     metrics = []
+    previous_metrics = {}
+    if previous_analysis:
+        for metric in previous_analysis.get("metrics", []):
+            label = str(metric.get("label", "")).lower()
+            if label:
+                previous_metrics[label] = metric.get("score")
 
     # Communication score - based on information reveals and tactics
     info_reveals = analysis.get("information_reveals", [])
     intentional_reveals = sum(1 for r in info_reveals if r.get("speaker") == "user" and r.get("was_intentional"))
     unintentional_reveals = sum(1 for r in info_reveals if r.get("speaker") == "user" and not r.get("was_intentional"))
     comm_score = max(50, min(95, 80 + intentional_reveals * 5 - unintentional_reveals * 10))
-    metrics.append({"label": "Communication", "score": comm_score, "change": 0})
+    metrics.append({
+        "label": "Communication",
+        "score": comm_score,
+        "change": int(comm_score - previous_metrics.get("communication", comm_score)),
+    })
 
     # Strategy score - based on outcome and objective achievement
     strategy_score = overall_score
@@ -246,7 +262,11 @@ def transform_to_frontend_format(analysis: Dict, final_advice: Optional[str] = N
         strategy_score = min(95, strategy_score + 10)
     if outcome.get("compared_to_batna") == "worse":
         strategy_score = max(40, strategy_score - 15)
-    metrics.append({"label": "Strategy", "score": strategy_score, "change": 0})
+    metrics.append({
+        "label": "Strategy",
+        "score": strategy_score,
+        "change": int(strategy_score - previous_metrics.get("strategy", strategy_score)),
+    })
 
     # Persuasion score - based on effective tactics
     effective_tactics = sum(1 for t in analysis.get("tactics_used", [])
@@ -254,22 +274,55 @@ def transform_to_frontend_format(analysis: Dict, final_advice: Optional[str] = N
     ineffective_tactics = sum(1 for t in analysis.get("tactics_used", [])
                              if t.get("speaker") == "user" and t.get("effectiveness") in ["ineffective", "backfired"])
     persuasion_score = max(45, min(95, 70 + effective_tactics * 8 - ineffective_tactics * 10))
-    metrics.append({"label": "Persuasion", "score": persuasion_score, "change": 0})
+    metrics.append({
+        "label": "Persuasion",
+        "score": persuasion_score,
+        "change": int(persuasion_score - previous_metrics.get("persuasion", persuasion_score)),
+    })
 
     # Listening score - based on missed opportunities (fewer = better listening)
     missed_count = len(analysis.get("missed_opportunities", []))
     listening_score = max(50, min(95, 90 - missed_count * 10))
-    metrics.append({"label": "Listening", "score": listening_score, "change": 0})
+    metrics.append({
+        "label": "Listening",
+        "score": listening_score,
+        "change": int(listening_score - previous_metrics.get("listening", listening_score)),
+    })
 
     # Confidence score - based on overall rating and tactics
     rating_to_confidence = {"excellent": 92, "good": 82, "fair": 68, "poor": 52}
     confidence_score = rating_to_confidence.get(outcome.get("overall_rating", "fair"), 70)
-    metrics.append({"label": "Confidence", "score": confidence_score, "change": 0})
+    metrics.append({
+        "label": "Confidence",
+        "score": confidence_score,
+        "change": int(confidence_score - previous_metrics.get("confidence", confidence_score)),
+    })
 
     # Adaptability score - based on turning points handled
     turning_points = analysis.get("turning_points", [])
     adaptability_score = max(55, min(95, 75 + len(turning_points) * 5))
-    metrics.append({"label": "Adaptability", "score": adaptability_score, "change": 0})
+    metrics.append({
+        "label": "Adaptability",
+        "score": adaptability_score,
+        "change": int(adaptability_score - previous_metrics.get("adaptability", adaptability_score)),
+    })
+
+    def _format_relative_time(timestamp: str) -> str:
+        if not timestamp or not transcript:
+            return timestamp
+        start_ts = transcript[0].get("timestamp")
+        if not start_ts:
+            return timestamp
+        try:
+            start_dt = datetime.fromisoformat(start_ts)
+            moment_dt = datetime.fromisoformat(timestamp)
+        except (ValueError, TypeError):
+            return timestamp
+        delta_seconds = int((moment_dt - start_dt).total_seconds())
+        if delta_seconds < 0:
+            return timestamp
+        minutes, seconds = divmod(delta_seconds, 60)
+        return f"{minutes:02d}:{seconds:02d}"
 
     # Build key moments from tactics, turning points, and missed opportunities
     key_moments = []
@@ -278,7 +331,7 @@ def transform_to_frontend_format(analysis: Dict, final_advice: Optional[str] = N
     for tp in analysis.get("turning_points", [])[:2]:
         moment_type = "positive" if "better" not in tp.get("better_alternative", "").lower() else "negative"
         key_moments.append({
-            "time": tp.get("timestamp", "0:00"),
+            "time": _format_relative_time(tp.get("timestamp", "0:00")),
             "desc": tp.get("description", "Key moment"),
             "type": moment_type
         })
@@ -287,7 +340,7 @@ def transform_to_frontend_format(analysis: Dict, final_advice: Optional[str] = N
     for tactic in analysis.get("tactics_used", [])[:2]:
         if tactic.get("speaker") == "user" and tactic.get("effectiveness") == "effective":
             key_moments.append({
-                "time": tactic.get("timestamp", "0:00"),
+                "time": _format_relative_time(tactic.get("timestamp", "0:00")),
                 "desc": f"{tactic.get('tactic_name', 'Tactic')}: {tactic.get('analysis', '')}",
                 "type": "positive"
             })
@@ -295,7 +348,7 @@ def transform_to_frontend_format(analysis: Dict, final_advice: Optional[str] = N
     # Add missed opportunities as negative moments
     for missed in analysis.get("missed_opportunities", [])[:2]:
         key_moments.append({
-            "time": missed.get("timestamp", "0:00"),
+            "time": _format_relative_time(missed.get("timestamp", "0:00")),
             "desc": missed.get("opportunity", "Missed opportunity"),
             "type": "negative"
         })
@@ -398,10 +451,29 @@ async def request_post_mortem(request: PostMortemRequest):
         logger.info(f"Running post-mortem analysis for {session_id} with {len(transcript)} messages")
         analysis = agent.analyze(transcript)
 
+        previous_analysis = None
+        supabase = get_supabase_client()
+        if supabase:
+            try:
+                previous_response = (
+                    supabase.table("recordings")
+                    .select("analysis")
+                    .neq("id", session_id)
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+                if previous_response.data:
+                    previous_analysis = previous_response.data[0].get("analysis")
+            except Exception as db_error:
+                logger.warning(f"Failed to load previous analysis: {db_error}")
+
         # Transform to frontend format
         frontend_result = transform_to_frontend_format(
             analysis,
-            session_data.get("final_advice")
+            session_data.get("final_advice"),
+            previous_analysis=previous_analysis,
+            transcript=transcript,
         )
 
         # Store the analysis in memory

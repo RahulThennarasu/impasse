@@ -12,6 +12,7 @@ import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import {
   getWsBaseUrl,
   requestPostMortem,
+  uploadNegotiationVideo,
   type CoachTip,
 } from "@/lib/api";
 
@@ -177,6 +178,34 @@ export function NegotiationClient() {
           mediaRecorder.ondataavailable = (event) => {
             if (event.data.size > 0) {
               recordedChunksRef.current.push(event.data);
+            }
+          };
+
+          mediaRecorder.onstop = async () => {
+            if (recordedChunksRef.current.length === 0) {
+              console.warn("No recorded chunks available for upload");
+              return;
+            }
+
+            const videoBlob = new Blob(recordedChunksRef.current, {
+              type: mimeType,
+            });
+
+            // Get sessionId from URL params
+            const urlParams = new URLSearchParams(window.location.search);
+            const currentSessionId = urlParams.get("sessionId");
+
+            if (!currentSessionId) {
+              console.warn("No session ID available for video upload");
+              return;
+            }
+
+            try {
+              console.log(`Uploading video for session ${currentSessionId}...`);
+              await uploadNegotiationVideo(currentSessionId, videoBlob, false);
+              console.log("Video uploaded successfully");
+            } catch (uploadError) {
+              console.error("Failed to upload video:", uploadError);
             }
           };
 

@@ -10,6 +10,7 @@ Flow:
 """
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
+from starlette.websockets import WebSocketState
 import logging
 import json
 import asyncio
@@ -128,6 +129,7 @@ class NegotiationSession:
                 "i'll go with,i would take,i can take"
             ).split(",") if p.strip()
         ]
+        self.closed = False
 
         logger.info(f"Created negotiation session {session_id}")
 
@@ -264,6 +266,7 @@ class NegotiationSession:
                     "transcript": self.opponent.transcript,
                     "auto_ended": True
                 })
+                self.closed = True
                 await self.websocket.close()
                 return
 
@@ -302,7 +305,8 @@ class NegotiationSession:
     async def generate_and_stream_audio(self, text: str):
         """Generate TTS audio and stream to frontend using Cartesia"""
         try:
-            if not self.cartesia_client and not os.getenv("CARTESIA_API_KEY"):
+            api_key = os.getenv("CARTESIA_API_KEY")
+            if not self.cartesia_client and not api_key:
                 logger.warning(f"Session {self.session_id}: TTS disabled - skipping audio generation")
                 return
 
@@ -325,21 +329,34 @@ class NegotiationSession:
                 "sample_rate": 44100,
             }
 
-            # Stream audio chunks using SSE
-            # Cartesia SDK returns dict with 'audio' key containing bytes
-            for chunk in self.cartesia_client.tts.sse(
-                model_id="sonic-3",
-                transcript=text,
-                voice_id=voice_id,
-                output_format=output_format,
-            ):
-                # Check if barge-in occurred
-                if self.is_tts_cancelled:
-                    logger.info(f"Session {self.session_id}: TTS cancelled due to barge-in")
-                    break
+            if self.cartesia_client:
+                # Stream audio chunks using SSE via SDK
+                for chunk in self.cartesia_client.tts.sse(
+                    model_id=tts_model,
+                    transcript=text,
+                    voice_id=voice_id,
+                    output_format=output_format,
+                    stream=True,
+                ):
+                    # Check if barge-in occurred
+                    if self.is_tts_cancelled:
+                        logger.info(f"Session {self.session_id}: TTS cancelled due to barge-in")
+                        break
 
-                audio_bytes = chunk.get("audio") if isinstance(chunk, dict) else chunk
-                if audio_bytes:
+                    audio_bytes = chunk.get("audio") if isinstance(chunk, dict) else chunk
+                    if audio_bytes:
+                        audio_base64 = base64.b64encode(audio_bytes).decode()
+                        await self.websocket.send_json({
+                            "type": "audio_chunk",
+                            "data": audio_base64,
+                            "sample_rate": 44100,
+                            "encoding": "pcm_s16le"
+                        })
+            else:
+                async for audio_bytes in self._cartesia_sse_stream(text, tts_model, voice_id, output_format):
+                    if self.is_tts_cancelled:
+                        logger.info(f"Session {self.session_id}: TTS cancelled due to barge-in")
+                        break
                     audio_base64 = base64.b64encode(audio_bytes).decode()
                     await self.websocket.send_json({
                         "type": "audio_chunk",
@@ -482,6 +499,7 @@ class NegotiationSession:
             self.dg_connection.finish()
         self.dg_connection = None
         self.dg_connected = False
+        self.closed = True
         logger.info(f"Session {self.session_id}: Cleaned up")
 
 
@@ -546,7 +564,14 @@ async def websocket_negotiation(websocket: WebSocket, session_id: str):
 
         # Main message loop
         while True:
-            data = await websocket.receive()
+            if session.closed or websocket.client_state != WebSocketState.CONNECTED:
+                break
+            try:
+                data = await websocket.receive()
+            except RuntimeError as e:
+                if "disconnect message has been received" in str(e):
+                    break
+                raise
 
             if "bytes" in data:
                 # Audio chunk from user

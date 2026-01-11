@@ -17,6 +17,8 @@ import {
   getPartUploadUrl,
   uploadPart,
   completeMultipartUpload,
+  uploadNegotiationVideo,
+  abortMultipartUpload,
   updatePostMortemVideoUrl,
   type CoachTip,
   type CompletedPart,
@@ -148,6 +150,7 @@ export function NegotiationClient() {
   const partNumberRef = useRef(1);
   const pendingChunksRef = useRef<Blob[]>([]);
   const uploadingRef = useRef(false);
+  const finalRecordingBlobRef = useRef<Blob | null>(null);
 
   const [isMuted, setIsMuted] = useState(false);
   const [isSkipConfirmOpen, setIsSkipConfirmOpen] = useState(false);
@@ -504,6 +507,10 @@ export function NegotiationClient() {
               return;
             }
 
+            if (recordedChunksRef.current.length > 0) {
+              finalRecordingBlobRef.current = new Blob(recordedChunksRef.current, { type: mimeType });
+            }
+
             // Upload any remaining chunks as the final part
             if (pendingChunksRef.current.length > 0) {
               const finalBlob = new Blob(pendingChunksRef.current, { type: mimeType });
@@ -655,7 +662,26 @@ export function NegotiationClient() {
         setProcessingStatus("Completing video upload...");
         let videoUrl: string | null = null;
 
-        if (uploadIdRef.current && uploadedPartsRef.current.length > 0) {
+        if (finalRecordingBlobRef.current) {
+          try {
+            videoUrl = await uploadNegotiationVideo(
+              currentSessionId,
+              finalRecordingBlobRef.current,
+              isPublic
+            );
+            if (uploadIdRef.current) {
+              try {
+                await abortMultipartUpload(currentSessionId, uploadIdRef.current);
+              } catch (abortError) {
+                console.warn("Failed to abort multipart upload:", abortError);
+              }
+            }
+          } catch (err) {
+            console.warn("Failed to upload finalized recording, falling back to multipart:", err);
+          }
+        }
+
+        if (!videoUrl && uploadIdRef.current && uploadedPartsRef.current.length > 0) {
           console.log("Completing multipart upload with visibility:", isPublic);
           const result = await completeMultipartUpload(
             currentSessionId,
@@ -676,7 +702,7 @@ export function NegotiationClient() {
               console.warn("Failed to link video to post-mortem:", err);
             }
           }
-        } else {
+        } else if (!videoUrl) {
           console.log("No video parts to upload");
         }
 

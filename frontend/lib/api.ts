@@ -47,7 +47,9 @@ export type VideoLink = {
   id: string;
   link: string;
   created_at?: string;
-  user_id?: string;
+  public?: boolean;
+  video_key?: string;
+  title?: string;
 };
 
 const DEFAULT_API_BASE = "http://localhost:8000";
@@ -96,13 +98,12 @@ export async function createVideoSession(link: string, userId?: string) {
   return (await response.json()) as VideoSession;
 }
 
-export async function fetchVideoLinks(userId?: string) {
-  let url = `${getApiBaseUrl()}/videos/links`;
-  if (userId) {
-    url += `?user_id=${encodeURIComponent(userId)}`;
+export async function fetchVideoLinks(publicOnly: boolean = false) {
+  const url = new URL(`${getApiBaseUrl()}/videos/links`);
+  if (publicOnly) {
+    url.searchParams.set("public_only", "true");
   }
-
-  const response = await fetch(url, {
+  const response = await fetch(url.toString(), {
     cache: "no-store",
   });
 
@@ -111,6 +112,20 @@ export async function fetchVideoLinks(userId?: string) {
   }
 
   return (await response.json()) as { videos: VideoLink[] };
+}
+
+export async function updateVideoTitle(sessionId: string, title: string) {
+  const response = await fetch(`${getApiBaseUrl()}/videos/${sessionId}/title`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Video title update failed");
+  }
+
+  return response.json();
 }
 
 export class PostMortemError extends Error {
@@ -478,6 +493,19 @@ export async function completeMultipartUpload(
 
   if (!response.ok) {
     throw new Error(`Failed to complete multipart upload: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+export async function abortMultipartUpload(sessionId: string, uploadId: string) {
+  const url = new URL(`${getApiBaseUrl()}/videos/multipart/abort`);
+  url.searchParams.set("session_id", sessionId);
+  url.searchParams.set("upload_id", uploadId);
+  const response = await fetch(url.toString(), { method: "POST" });
+
+  if (!response.ok) {
+    throw new Error(`Failed to abort multipart upload: ${response.statusText}`);
   }
 
   return response.json();

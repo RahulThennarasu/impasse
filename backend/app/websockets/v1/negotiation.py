@@ -103,13 +103,16 @@ class NegotiationSession:
 
         # Cartesia client for TTS
         try:
+            cartesia_key = settings.CARTESIA_API_KEY
+            logger.info(f"Cartesia key loaded (settings): {bool(cartesia_key)}")
+            logger.info(f"Cartesia voice id (settings): {settings.CARTESIA_VOICE_ID}")
             if Cartesia:
-                self.cartesia_client = Cartesia(api_key=os.getenv("CARTESIA_API_KEY"))
+                self.cartesia_client = Cartesia(api_key=cartesia_key)
                 self.cartesia_available = True
             else:
                 self.cartesia_client = None
                 self.cartesia_available = False
-                if os.getenv("CARTESIA_API_KEY"):
+                if cartesia_key:
                     logger.warning("Cartesia SDK unavailable - falling back to HTTP TTS")
                 else:
                     logger.warning("Cartesia API key missing - TTS will be disabled")
@@ -573,7 +576,8 @@ class NegotiationSession:
             })
 
     async def _cartesia_sse_stream(self, text: str, model_id: str, voice_id: str, output_format: dict):
-        api_key = os.getenv("CARTESIA_API_KEY")
+        api_key = settings.CARTESIA_API_KEY
+
         if not api_key:
             return
         base_url = os.getenv("CARTESIA_BASE_URL", "https://api.cartesia.ai")
@@ -889,6 +893,10 @@ class VideoLinksResponse(BaseModel):
     videos: List[dict]
 
 
+class VideoTitleUpdate(BaseModel):
+    title: str
+
+
 @negotiation_router.post("/videos/session", response_model=VideoSessionResponse)
 async def create_video_session(request: VideoSessionRequest):
     """
@@ -907,7 +915,12 @@ async def create_video_session(request: VideoSessionRequest):
         logger.info(f"Creating video session with data: {insert_data}")
 
         # Insert the new video session into the database
-        response = supabase.table("recordings").insert(insert_data).execute()
+        response = supabase.table("recordings").insert({
+            # "id": session_id,
+            "link": request.link,
+            "public": False,
+        }).execute()
+        # print("Response data", response.data)
         session_id = response.data[0].get("id")
 
         logger.info(f"Created video session: {session_id} for user: {request.user_id}")
@@ -934,7 +947,7 @@ async def create_video_session(request: VideoSessionRequest):
 
 
 @negotiation_router.get("/videos/links", response_model=VideoLinksResponse)
-async def get_all_video_links(user_id: Optional[str] = None):
+async def get_all_video_links(public_only: bool = False):
     """
     Retrieve video links from the Supabase recordings table.
 
@@ -948,18 +961,14 @@ async def get_all_video_links(user_id: Optional[str] = None):
     """
     try:
         supabase = get_supabase_client()
-
-        logger.info(f"Fetching video links for user_id: {user_id}")
-
-        # Build query - filter by user_id if provided
+        
+        # Fetch video records from the database
         query = supabase.table("recordings").select("*")
-        if user_id:
-            query = query.eq("user_id", user_id)
-
-        # Order by created_at descending to show newest first
-        response = query.order("created_at", desc=True).execute()
-
-        logger.info(f"Retrieved {len(response.data)} video records for user_id: {user_id}")
+        if public_only:
+            query = query.eq("public", True)
+        response = query.execute()
+        
+        logger.info(f"Retrieved {len(response.data)} video records")
 
         return VideoLinksResponse(
             videos=response.data
@@ -970,6 +979,24 @@ async def get_all_video_links(user_id: Optional[str] = None):
         raise HTTPException(
             status_code=500,
             detail="Failed to retrieve video links"
+        )
+
+
+@negotiation_router.patch("/videos/{session_id}/title")
+async def update_video_title(session_id: str, data: VideoTitleUpdate):
+    """
+    Update the title for a video session.
+    """
+    try:
+        supabase = get_supabase_client()
+        update_data = {"title": data.title.strip()}
+        supabase.table("recordings").update(update_data).eq("id", session_id).execute()
+        return {"status": "updated", "session_id": session_id}
+    except Exception as e:
+        logger.error(f"Failed to update video title for session {session_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to update video title"
         )
 
 

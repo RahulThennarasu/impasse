@@ -1,8 +1,8 @@
-from groq import Groq
 import os
 import json
 from datetime import datetime
 from typing import List, Dict
+from google import genai
 
 
 class PostMortemAgent:
@@ -25,7 +25,7 @@ class PostMortemAgent:
             opponent_hidden_state: Opponent's true constraints/objectives (from opponent.get_hidden_state())
             coach_config: Coach's context (what user knew going in)
         """
-        self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
         # User's perspective
         self.user_objectives = user_briefing.get("objectives", {})
@@ -157,17 +157,20 @@ IMPORTANT INSTRUCTIONS:
 
 Return ONLY valid JSON, no other text."""
 
-        response = self.client.chat.completions.create(
-            model=os.getenv("GROQ_POST_MORTEM_MODEL", "llama-3.1-8b-instant"),
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": analysis_prompt}
-            ],
-            temperature=0.4,  # Lower for consistent structured output
-            max_tokens=int(os.getenv("GROQ_POST_MORTEM_TOKENS", "4000")),
+        model = os.getenv("GEMINI_POST_MORTEM_MODEL", "gemini-2.5-flash-lite")
+        max_tokens = int(os.getenv("GEMINI_POST_MORTEM_TOKENS", "4000"))
+        response = self.client.models.generate_content(
+            model=model,
+            contents=analysis_prompt,
+            config=genai.types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                temperature=0.4,
+                max_output_tokens=max_tokens,
+                response_mime_type="application/json",
+            ),
         )
 
-        result = response.choices[0].message.content.strip()
+        result = self._extract_response_text(response)
         return self._parse_json(result)
 
     def get_summary(self, analysis: Dict) -> str:
@@ -403,3 +406,21 @@ Your job is to analyze the negotiation objectively, knowing what BOTH sides actu
 
         # Return error with raw text
         return {"parse_error": True, "raw_response": text}
+
+    def _extract_response_text(self, response) -> str:
+        """Extracts text from a Gemini response safely."""
+        if hasattr(response, "text") and response.text:
+            return response.text.strip()
+
+        candidates = getattr(response, "candidates", None) or []
+        for candidate in candidates:
+            content = getattr(candidate, "content", None)
+            parts = getattr(content, "parts", None) if content else None
+            if not parts:
+                continue
+            for part in parts:
+                text = getattr(part, "text", None)
+                if text:
+                    return text.strip()
+
+        return ""

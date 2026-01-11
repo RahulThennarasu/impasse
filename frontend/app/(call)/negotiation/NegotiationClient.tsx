@@ -12,8 +12,10 @@ import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import {
   getWsBaseUrl,
   requestPostMortem,
+  uploadNegotiationVideo,
   type CoachTip,
 } from "@/lib/api";
+import { UploadModal } from "@/components/UploadModal";
 
 const initialCoachSuggestions: CoachTip[] = [
   {
@@ -124,8 +126,13 @@ export function NegotiationClient() {
   const autoEndRef = useRef(false);
   const ttsSourcesRef = useRef<AudioBufferSourceNode[]>([]);
   const isTtsPlayingRef = useRef(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
 
   const [isMuted, setIsMuted] = useState(false);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
+  const [sessionDuration, setSessionDuration] = useState("");
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [mediaError, setMediaError] = useState<string | null>(null);
@@ -171,6 +178,31 @@ export function NegotiationClient() {
         if (videoRef.current) {
           videoRef.current.srcObject = mediaStream;
         }
+
+        // Start recording for potential upload
+        try {
+          const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
+            ? "video/webm;codecs=vp9,opus"
+            : "video/webm";
+          const mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
+          mediaRecorderRef.current = mediaRecorder;
+          recordedChunksRef.current = [];
+
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+              recordedChunksRef.current.push(event.data);
+            }
+          };
+
+          mediaRecorder.onstop = () => {
+            const blob = new Blob(recordedChunksRef.current, { type: "video/webm" });
+            setRecordedBlob(blob);
+          };
+
+          mediaRecorder.start(1000); // Collect data every second
+        } catch (recorderError) {
+          console.warn("MediaRecorder not supported, video upload will be disabled:", recorderError);
+        }
       } catch (error) {
         setMediaError("Unable to access camera or microphone.");
       }
@@ -182,6 +214,9 @@ export function NegotiationClient() {
 
     return () => {
       active = false;
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
       setStream((current) => {
         current?.getTracks().forEach((track) => track.stop());
         return null;
@@ -543,12 +578,39 @@ export function NegotiationClient() {
     };
   }, [stream, isMuted, socketReady, phase, stopTtsPlayback]);
 
-  const handleEndSession = async () => {
+  const handleEndSession = useCallback(() => {
     autoEndRef.current = true;
+
+    // Stop recording and trigger the onstop handler
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+
+    // Calculate session duration for display
+    setSessionDuration(formatTime(callRemaining));
+
     if (wsRef.current) {
       wsRef.current.send(JSON.stringify({ type: "end_negotiation" }));
     }
     endCall();
+
+    // Show upload modal instead of immediately navigating
+    setIsUploadModalOpen(true);
+  }, [callRemaining, endCall]);
+
+  const handleUpload = useCallback(async () => {
+    if (!recordedBlob || !sessionId) {
+      throw new Error("No recording available");
+    }
+    await uploadNegotiationVideo(sessionId, recordedBlob);
+  }, [recordedBlob, sessionId]);
+
+  const handleNavigateToPostMortem = useCallback(async () => {
+    setIsUploadModalOpen(false);
+
+    // Stop all tracks
+    stream?.getTracks().forEach((track) => track.stop());
+
     if (sessionId) {
       try {
         await requestPostMortem(sessionId);
@@ -557,7 +619,7 @@ export function NegotiationClient() {
       }
     }
     router.push(`/postmortem/${sessionId || "current-session"}`);
-  };
+  }, [router, stream, sessionId]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -760,6 +822,14 @@ export function NegotiationClient() {
           onEndSession={handleEndSession}
         />
       </main>
+
+      <UploadModal
+        isOpen={isUploadModalOpen}
+        onClose={handleNavigateToPostMortem}
+        onConfirmUpload={handleUpload}
+        onSkip={handleNavigateToPostMortem}
+        sessionDuration={sessionDuration}
+      />
     </div>
   );
 }

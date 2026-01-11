@@ -1,5 +1,6 @@
 import os
 from google import genai
+from groq import Groq
 import json
 import logging
 import re
@@ -15,10 +16,12 @@ logger = logging.getLogger(__name__)
 def generate_scenario(context: str) -> Dict:
     client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
     model = os.getenv("GEMINI_SCENARIO_MODEL", "gemini-2.5-flash-lite")
+    fallback_model = os.getenv("GEMINI_SCENARIO_FALLBACK_MODEL", "gemini-2.5-flash")
+    groq_fallback_model = os.getenv("GROQ_SCENARIO_FALLBACK_MODEL", "groq/compound")
     logger.info(f"Scenario generation model: {model}")
     prompt = create_prompt(context)
 
-    def _request(max_tokens: int, compact: bool):
+    def _request(model_name: str, max_tokens: int, compact: bool):
         contents = prompt
         if compact:
             contents += (
@@ -26,7 +29,7 @@ def generate_scenario(context: str) -> Dict:
                 "Keep user_narrative to 2 short paragraphs."
             )
         return client.models.generate_content(
-            model=model,
+            model=model_name,
             contents=contents,
             config=genai.types.GenerateContentConfig(
                 temperature=0.4,
@@ -35,20 +38,41 @@ def generate_scenario(context: str) -> Dict:
             ),
         )
 
-    max_tokens = int(os.getenv("GEMINI_SCENARIO_TOKENS", "2000"))
-    response = _request(max_tokens, compact=False)
+    max_tokens = int(os.getenv("GEMINI_SCENARIO_TOKENS", "8000"))
+    response = None
     try:
+        response = _request(model, max_tokens, compact=False)
         scenario = _extract_scenario_from_response(response)
-    except Exception:
-        texts = _collect_response_texts(response)
+    except Exception as e:
+        texts = _collect_response_texts(response) if response is not None else []
         sample = texts[0] if texts else ""
-        if _is_truncated(sample):
-            retry_tokens = int(
-                os.getenv("GEMINI_SCENARIO_TOKENS_RETRY", "2400"))
-            response = _request(retry_tokens, compact=True)
-            scenario = _extract_scenario_from_response(response)
-        else:
-            raise
+        error_text = str(e).lower()
+        try:
+            if "503" in error_text or "unavailable" in error_text or "overloaded" in error_text:
+                logger.warning("Scenario model overloaded; retrying with fallback model.")
+                response = _request(fallback_model, max_tokens, compact=False)
+                scenario = _extract_scenario_from_response(response)
+            elif _is_truncated(sample):
+                retry_tokens = int(os.getenv("GEMINI_SCENARIO_TOKENS_RETRY", "8000"))
+                logger.warning(f"Response truncated (sample length: {len(sample)}), retrying with {retry_tokens} tokens and compact prompt")
+                response = _request(model, retry_tokens, compact=True)
+                scenario = _extract_scenario_from_response(response)
+            else:
+                raise
+        except Exception:
+            logger.warning("Gemini scenario parsing failed; falling back to Groq.")
+            groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+            groq_response = groq_client.chat.completions.create(
+                model=groq_fallback_model,
+                messages=[
+                    {"role": "system", "content": "Return only valid JSON that matches the requested schema. No extra text."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.4,
+                max_tokens=int(os.getenv("GROQ_SCENARIO_TOKENS", "900")),
+            )
+            scenario_text = groq_response.choices[0].message.content or ""
+            scenario = _parse_json_response(scenario_text)
     # scenario is parsed above
 
     # Transform opponent data into format OpponentAgent expects
@@ -91,15 +115,18 @@ def generate_scenario(context: str) -> Dict:
 
 
 def _extract_scenario_from_response(response) -> Dict:
+    # First check if response has parsed attribute
     if hasattr(response, "parsed") and response.parsed is not None:
+        logger.debug(f"Found parsed attribute, type: {type(response.parsed)}")
         if isinstance(response.parsed, dict):
             return response.parsed
         if isinstance(response.parsed, str):
             try:
                 return _parse_json_response(response.parsed)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to parse response.parsed as JSON: {e}")
 
+    # Collect all possible text candidates
     candidates = _collect_response_texts(response)
     logger.info(
         "Scenario response candidates: text=%s, candidates=%s",
@@ -107,28 +134,68 @@ def _extract_scenario_from_response(response) -> Dict:
         len(getattr(response, "candidates", []) or []),
     )
 
-    for candidate in candidates:
+    # Log first 200 chars of each candidate for debugging
+    for i, candidate in enumerate(candidates):
+        logger.debug(f"Candidate {i} preview: {candidate[:200] if candidate else '<empty>'}...")
+
+    # Try parsing each candidate
+    for i, candidate in enumerate(candidates):
         try:
-            return _parse_json_response(candidate)
-        except Exception:
+            logger.info(f"Attempting to parse candidate {i}, length: {len(candidate)}, starts with: {candidate[:50]}, ends with: {candidate[-50:]}")
+            result = _parse_json_response(candidate)
+            logger.info(f"Successfully parsed candidate {i}")
+            return result
+        except Exception as e:
+            logger.error(f"Failed to parse candidate {i}: {str(e)}")
+            logger.error(f"Candidate {i} first 1000 chars: {candidate[:1000]}")
+            logger.error(f"Candidate {i} last 500 chars: {candidate[-500:]}")
             continue
+
+    # If all failed, log detailed error info
+    logger.error(f"Response type: {type(response)}")
+    logger.error(f"Response attributes: {dir(response)}")
+    if hasattr(response, "text"):
+        logger.error(f"Response.text type: {type(response.text)}, value: {str(response.text)[:500]}")
+    if hasattr(response, "candidates") and response.candidates:
+        logger.error(f"Number of candidates: {len(response.candidates)}")
+        for i, cand in enumerate(response.candidates[:2]):  # Log first 2 candidates
+            logger.error(f"Candidate {i} structure: {dir(cand)}")
+            if hasattr(cand, "content"):
+                logger.error(f"Candidate {i} content: {cand.content}")
 
     raise ValueError("Could not parse JSON from response: <empty>")
 
 
 def _collect_response_texts(response) -> list[str]:
     candidates: list[str] = []
-    if hasattr(response, "text") and response.text:
-        candidates.append(response.text)
 
+    # Check response.text
+    has_text_attr = hasattr(response, "text")
+    text_value = getattr(response, "text", None) if has_text_attr else None
+    logger.debug(f"Response has 'text' attribute: {has_text_attr}, value type: {type(text_value)}, is truthy: {bool(text_value)}")
+
+    if has_text_attr and text_value:
+        logger.debug(f"Adding response.text to candidates (length: {len(text_value)})")
+        candidates.append(text_value)
+
+    # Check response.candidates
     if hasattr(response, "candidates"):
-        for cand in response.candidates or []:
+        logger.debug(f"Response has candidates: {len(response.candidates or [])}")
+        for i, cand in enumerate(response.candidates or []):
+            logger.debug(f"Processing candidate {i}, type: {type(cand)}")
             content = getattr(cand, "content", None)
-            if content and getattr(content, "parts", None):
-                for part in content.parts:
-                    text = getattr(part, "text", None)
-                    if text:
-                        candidates.append(text)
+            logger.debug(f"Candidate {i} has content: {content is not None}")
+            if content:
+                parts = getattr(content, "parts", None)
+                logger.debug(f"Candidate {i} content has parts: {parts is not None}, count: {len(parts) if parts else 0}")
+                if parts:
+                    for j, part in enumerate(parts):
+                        text = getattr(part, "text", None)
+                        logger.debug(f"Candidate {i} part {j} has text: {text is not None}, length: {len(text) if text else 0}")
+                        if text:
+                            candidates.append(text)
+
+    logger.debug(f"Total candidates collected: {len(candidates)}")
     return candidates
 
 
@@ -350,6 +417,9 @@ def _build_display_description(narrative: str, user_briefing: Dict, metadata: Di
 def _parse_json_response(response_text: str) -> Dict:
     def _sanitize_json(text: str) -> str:
         text = text.strip()
+        # Remove triple quotes if present (Gemini sometimes wraps JSON in """)
+        if text.startswith('"""') and text.endswith('"""'):
+            text = text[3:-3].strip()
         # Remove trailing commas before closing braces/brackets.
         text = re.sub(r",\s*([}\]])", r"\1", text)
         return text
@@ -398,7 +468,8 @@ def _parse_json_response(response_text: str) -> Dict:
         except json.JSONDecodeError:
             return None
 
-    cleaned = _strip_invalid_controls(response_text)
+    # First sanitize the input
+    cleaned = _sanitize_json(_strip_invalid_controls(response_text))
     direct = _try_load(cleaned) or _raw_decode(cleaned)
     if direct is not None:
         return direct

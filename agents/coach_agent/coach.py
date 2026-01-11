@@ -37,8 +37,9 @@ class CoachAgent:
                 - info_asymmetries: What you know vs. what they know
         """
         self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        self.model = os.getenv("GROQ_COACH_MODEL", "llama-3.3-70b-versatile")
-        self.max_tip_tokens = int(os.getenv("GROQ_COACH_TIP_TOKENS", "40"))
+        self.model = os.getenv("GROQ_COACH_MODEL", "groq/compound")
+        self.fallback_model = os.getenv("GROQ_COACH_FALLBACK_MODEL", "groq/compound-mini")
+        self.max_tip_tokens = int(os.getenv("GROQ_COACH_TIP_TOKENS", "80"))
         self.max_final_tokens = int(os.getenv("GROQ_COACH_FINAL_TOKENS", "120"))
         self.last_analyzed_turn = 0
 
@@ -111,16 +112,16 @@ YOUR COACHING ROLE:
 
 IMPORTANT RULES:
 - Only speak when you spot something VALUABLE (don't spam advice every turn)
-- Keep tips SHORT and ACTIONABLE (1-2 sentences max)
-- Format: "[Tactic/Opportunity]: [What to do]"
+- Keep tips SHORT and ACTIONABLE (1-2 sentences max) plus a short example line
+- Format: "💡 [Tactic/Opportunity]: [What to do] Say: \"<exact line the user can say>\""
 - If nothing important happened, respond with exactly: "PASS"
 
 EXAMPLES:
-- "Anchoring detected: They opened at $80k to set a low range. Counter with data on market rates, don't split the difference."
-- "Bluff spotted: They claimed budget constraints but just offered more. Test their real ceiling."
-- "Opening: They asked about your timeline twice. That's their pressure point - they need speed."
-- "Mistake: You revealed your deadline. Now they know you're under time pressure."
-- "Leverage moment: Mention your alternative offer NOW while they're making concessions."
+- "💡 Anchoring detected: They opened at $80k to set a low range. Counter with market data and restate your target. Say: \"Based on market comps, I’m targeting $95k and can justify it with X and Y.\""
+- "💡 Bluff spotted: They claimed budget constraints but just offered more. Test their real ceiling. Say: \"What’s the maximum you can approve today without another review?\""
+- "💡 Opening: They asked about your timeline twice. That’s their pressure point. Say: \"My timing is flexible if we can align on a stronger total package.\""
+- "💡 Mistake: You revealed your deadline. Regain leverage by reframing. Say: \"I’m exploring options, but I’m prioritizing the right fit over speed.\""
+- "💡 Leverage moment: They’re making concessions—press for a trade. Say: \"If we can move base to $X, I can be flexible on title timing.\""
 
 Remember: You're helping them LEARN, not doing the negotiation for them."""
 
@@ -148,7 +149,7 @@ Remember: You're helping them LEARN, not doing the negotiation for them."""
             {"role": "user", "content": f"Analyze this exchange:\n\n{self._format_transcript(recent_messages)}"}
         ]
 
-        response = self.client.chat.completions.create(
+        response = self._create_completion(
             model=self.model,
             messages=[
                 {"role": "system", "content": self.system_prompt},
@@ -198,7 +199,7 @@ Here's the full negotiation:
 
 {self._format_transcript(transcript)}"""
 
-        response = self.client.chat.completions.create(
+        response = self._create_completion(
             model=self.model,
             messages=[
                 {"role": "system", "content": self.system_prompt},
@@ -213,6 +214,25 @@ Here's the full negotiation:
     def reset(self) -> None:
         """Reset the coach for a new negotiation."""
         self.last_analyzed_turn = 0
+
+    def _create_completion(self, model: str, messages: List[Dict[str, str]], temperature: float, max_tokens: int):
+        try:
+            return self.client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+        except Exception as e:
+            error_text = str(e).lower()
+            if "rate_limit" in error_text or "429" in error_text:
+                return self.client.chat.completions.create(
+                    model=self.fallback_model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+            raise
 
     def _format_transcript(self, messages: List[Dict]) -> str:
         """

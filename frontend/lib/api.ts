@@ -33,6 +33,11 @@ export type PostMortemResult = {
   keyMoments: PostMortemMoment[];
 };
 
+export type AnalyticsResponse = {
+  session_id: string;
+  analysis: Partial<PostMortemResult> & Record<string, unknown>;
+};
+
 export type VideoSession = {
   session_id: string;
   created_at: string;
@@ -124,6 +129,44 @@ export async function fetchPostMortem(sessionId: string) {
   }
 
   return (await response.json()) as PostMortemResult;
+}
+
+const normalizeAnalytics = (analysis: AnalyticsResponse["analysis"]): PostMortemResult => {
+  const metricsRaw = Array.isArray(analysis.metrics) ? analysis.metrics : [];
+  const keyMomentsRaw = Array.isArray(analysis.keyMoments)
+    ? analysis.keyMoments
+    : Array.isArray((analysis as Record<string, unknown>).key_moments)
+      ? ((analysis as Record<string, unknown>).key_moments as PostMortemMoment[])
+      : [];
+
+  return {
+    overallScore: Number(analysis.overallScore ?? (analysis as Record<string, unknown>).overall_score ?? 0),
+    strengths: Array.isArray(analysis.strengths) ? analysis.strengths : [],
+    improvements: Array.isArray(analysis.improvements) ? analysis.improvements : [],
+    metrics: metricsRaw.map((metric) => ({
+      label: String((metric as PostMortemMetric).label ?? "Metric"),
+      score: Number((metric as PostMortemMetric).score ?? 0),
+      change: Number((metric as PostMortemMetric).change ?? 0),
+    })),
+    keyMoments: keyMomentsRaw.map((moment) => ({
+      time: String((moment as PostMortemMoment).time ?? "--"),
+      desc: String((moment as PostMortemMoment).desc ?? ""),
+      type: ((moment as PostMortemMoment).type ?? "positive") as PostMortemMoment["type"],
+    })),
+  };
+};
+
+export async function fetchAnalytics(sessionId: string) {
+  const response = await fetch(`${getServerApiBaseUrl()}/videos/${sessionId}/analytics`, {
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error("Analytics fetch failed");
+  }
+
+  const data = (await response.json()) as AnalyticsResponse;
+  return normalizeAnalytics(data.analysis ?? {});
 }
 
 // =============================================================================

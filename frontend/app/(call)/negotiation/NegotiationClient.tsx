@@ -15,22 +15,7 @@ import {
   type CoachTip,
 } from "@/lib/api";
 
-const initialCoachSuggestions: CoachTip[] = [
-  {
-    id: "tip-1",
-    text: "Good rapport building. They're receptive to your approach.",
-    time: "Just now",
-    priority: "high",
-    category: "Rapport",
-  },
-  {
-    id: "tip-2",
-    text: "Consider slowing your pace. Pauses show confidence.",
-    time: "2 min ago",
-    priority: "medium",
-    category: "Delivery",
-  },
-];
+const initialCoachSuggestions: CoachTip[] = [];
 
 const base64ToArrayBuffer = (base64: string) => {
   const binary = atob(base64);
@@ -116,8 +101,11 @@ export function NegotiationClient() {
   const ttsContextRef = useRef<AudioContext | null>(null);
   const ttsQueueEndRef = useRef<number>(0);
   const ttsEndTimerRef = useRef<number | null>(null);
+  const ttsStartTimeRef = useRef<number>(0);
   const inputContextRef = useRef<AudioContext | null>(null);
   const inputProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const speechFrameCountRef = useRef(0);
+  const lastBargeInRef = useRef(0);
   const inputGainRef = useRef<GainNode | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -449,18 +437,6 @@ export function NegotiationClient() {
         if (data.type === "error") {
           setMediaError(data.message ?? "Server error");
         }
-        if (data.type === "transcription") {
-          setCoachSuggestions((prev) => [
-            {
-              id: `coach-${Date.now()}`,
-              text: data.text ?? "Transcribing...",
-              time: "now",
-              priority: "low",
-              category: "Transcript",
-            },
-            ...prev,
-          ]);
-        }
         if (data.type === "opponent_opening" || data.type === "opponent_text") {
           setAgentStatus("thinking");
           setCoachSuggestions((prev) => [
@@ -490,6 +466,7 @@ export function NegotiationClient() {
           setAgentStatus("speaking");
           setAgentActivity(0.85);
           isTtsPlayingRef.current = true;
+          ttsStartTimeRef.current = Date.now();
           ttsSourcesRef.current = [];
           if (ttsContextRef.current) {
             ttsQueueEndRef.current = ttsContextRef.current.currentTime;
@@ -593,11 +570,21 @@ export function NegotiationClient() {
         energy += input[i] * input[i];
       }
       const rms = Math.sqrt(energy / input.length);
-      const speechThreshold = 0.02; // Adjust threshold as needed
+      const speechThreshold = 0.05;
 
       // If TTS is playing and user starts speaking, trigger barge-in
       if (isTtsPlayingRef.current && rms > speechThreshold) {
-        stopTtsPlayback();
+        speechFrameCountRef.current += 1;
+      } else {
+        speechFrameCountRef.current = 0;
+      }
+      if (isTtsPlayingRef.current && speechFrameCountRef.current >= 3) {
+        const now = Date.now();
+        if (now - ttsStartTimeRef.current > 500 && now - lastBargeInRef.current > 1000) {
+          lastBargeInRef.current = now;
+          stopTtsPlayback();
+        }
+        speechFrameCountRef.current = 0;
       }
 
       const resampled = downsampleBuffer(input, context.sampleRate, 16000);

@@ -122,6 +122,8 @@ export function NegotiationClient() {
   const wsRef = useRef<WebSocket | null>(null);
   const rafRef = useRef<number | null>(null);
   const autoEndRef = useRef(false);
+  const ttsSourcesRef = useRef<AudioBufferSourceNode[]>([]);
+  const isTtsPlayingRef = useRef(false);
 
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
@@ -250,6 +252,36 @@ export function NegotiationClient() {
       audioContextRef.current = null;
     }
     analyserRef.current = null;
+  }, []);
+
+  const stopTtsPlayback = useCallback(() => {
+    // Stop all queued TTS audio sources
+    ttsSourcesRef.current.forEach((source) => {
+      try {
+        source.stop();
+        source.disconnect();
+      } catch {
+        // Source may have already ended
+      }
+    });
+    ttsSourcesRef.current = [];
+    isTtsPlayingRef.current = false;
+    ttsQueueEndRef.current = 0;
+
+    // Clear the end timer
+    if (ttsEndTimerRef.current) {
+      window.clearTimeout(ttsEndTimerRef.current);
+      ttsEndTimerRef.current = null;
+    }
+
+    // Reset agent status
+    setAgentStatus("idle");
+    setAgentActivity(0);
+
+    // Notify backend about barge-in
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "barge_in" }));
+    }
   }, []);
 
   useEffect(() => {
@@ -382,6 +414,8 @@ export function NegotiationClient() {
         if (data.type === "audio_start") {
           setAgentStatus("speaking");
           setAgentActivity(0.85);
+          isTtsPlayingRef.current = true;
+          ttsSourcesRef.current = [];
           if (ttsContextRef.current) {
             ttsQueueEndRef.current = ttsContextRef.current.currentTime;
             void ttsContextRef.current.resume();
@@ -414,6 +448,11 @@ export function NegotiationClient() {
           );
           source.start(startTime);
           ttsQueueEndRef.current = startTime + audioBuffer.duration;
+          // Track the source for barge-in cancellation
+          ttsSourcesRef.current.push(source);
+          source.onended = () => {
+            ttsSourcesRef.current = ttsSourcesRef.current.filter((s) => s !== source);
+          };
         }
         if (data.type === "audio_end") {
           if (ttsEndTimerRef.current) {
@@ -426,6 +465,7 @@ export function NegotiationClient() {
           ttsEndTimerRef.current = window.setTimeout(() => {
             setAgentStatus("idle");
             setAgentActivity(0);
+            isTtsPlayingRef.current = false;
           }, remaining * 1000 + 40);
         }
         if (data.type === "negotiation_complete") {
@@ -469,6 +509,20 @@ export function NegotiationClient() {
     processor.onaudioprocess = (event) => {
       if (ws.readyState !== WebSocket.OPEN || isMuted) return;
       const input = event.inputBuffer.getChannelData(0);
+
+      // Detect if user is speaking (calculate RMS energy)
+      let energy = 0;
+      for (let i = 0; i < input.length; i += 1) {
+        energy += input[i] * input[i];
+      }
+      const rms = Math.sqrt(energy / input.length);
+      const speechThreshold = 0.02; // Adjust threshold as needed
+
+      // If TTS is playing and user starts speaking, trigger barge-in
+      if (isTtsPlayingRef.current && rms > speechThreshold) {
+        stopTtsPlayback();
+      }
+
       const resampled = downsampleBuffer(input, context.sampleRate, 16000);
       const pcm16 = floatTo16BitPCM(resampled);
       ws.send(pcm16.buffer);
@@ -487,7 +541,7 @@ export function NegotiationClient() {
       context.close();
       inputContextRef.current = null;
     };
-  }, [stream, isMuted, socketReady, phase]);
+  }, [stream, isMuted, socketReady, phase, stopTtsPlayback]);
 
   const handleEndSession = async () => {
     autoEndRef.current = true;

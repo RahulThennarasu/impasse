@@ -20,5 +20,9 @@ class Settings(BaseSettings):
     S3_BUCKET_NAME: Optional[str] = None
     S3_PRESIGNED_URL_EXPIRATION: int = 3600  # 1 hour
 
+    # Supabase Configuration
+    SUPABASE_URL: Optional[str] = None
+    SUPABASE_KEY: Optional[str] = None
+
 
 settings = Settings()

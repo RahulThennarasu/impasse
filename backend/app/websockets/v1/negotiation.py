@@ -23,6 +23,8 @@ from typing import Dict, Optional
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../../.."))
 
 from pydantic import BaseModel
+from supabase import create_client, Client
+from app.core.config import settings
 from agents.scenario_agent.scenario import generate_scenario
 from deepgram import DeepgramClient, DeepgramClientOptions, LiveOptions
 from deepgram.clients.live.v1 import LiveTranscriptionEvents
@@ -37,6 +39,16 @@ from agents.coach_agent.coach import CoachAgent
 logger = logging.getLogger(__name__)
 
 negotiation_router = APIRouter()
+
+
+def get_supabase_client() -> Client:
+    """Initialize and return a Supabase client"""
+    if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="Supabase credentials not configured"
+        )
+    return create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
 
 
 class NegotiationSession:
@@ -641,3 +653,88 @@ async def update_negotiation_scenario_info(session_id: str, scenario_info: str):
     return {
         "scenario_paragraph": scenario_para
     }
+
+
+class VideoSessionRequest(BaseModel):
+    """Request model for creating a new video session"""
+    link: str
+
+
+class VideoSessionResponse(BaseModel):
+    """Response model for video session creation"""
+    session_id: str
+    created_at: str
+
+
+class VideoLinksResponse(BaseModel):
+    """Response model for fetching all video links"""
+    videos: List[dict]
+
+
+@negotiation_router.post("/videos/session", response_model=VideoSessionResponse)
+async def create_video_session(request: VideoSessionRequest):
+    """
+    Register a new video session in the Supabase table.
+    
+    Returns the newly created session ID.
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        # Generate a new UUID for the session
+        session_id = str(uuid.uuid4())
+        
+        # Insert the new video session into the database
+        response = supabase.table("videos").insert({
+            "uuid": session_id,
+            "link": request.link
+        }).execute()
+        
+        logger.info(f"Created video session: {session_id}")
+        
+        # Extract created_at from the response
+        if response.data and len(response.data) > 0:
+            created_at = response.data[0].get("created_at", "")
+            return VideoSessionResponse(
+                session_id=session_id,
+                created_at=created_at
+            )
+        
+        return VideoSessionResponse(
+            session_id=session_id,
+            created_at=""
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to create video session: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to create video session"
+        )
+
+
+@negotiation_router.get("/videos/links", response_model=VideoLinksResponse)
+async def get_all_video_links():
+    """
+    Retrieve all video links from the Supabase videos table.
+    
+    Returns a list of all video records with their uuid, link, and created_at.
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        # Fetch all video records from the database
+        response = supabase.table("videos").select("*").execute()
+        
+        logger.info(f"Retrieved {len(response.data)} video records")
+        
+        return VideoLinksResponse(
+            videos=response.data
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to retrieve video links: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve video links"
+        )

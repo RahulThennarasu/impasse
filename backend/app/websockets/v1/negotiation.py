@@ -15,6 +15,7 @@ import json
 import asyncio
 import os
 import base64
+import sys
 from typing import Dict, Optional
 import sys
 
@@ -28,10 +29,14 @@ from deepgram.clients.live.v1 import LiveTranscriptionEvents
 try:
     from cartesia import Cartesia
 except ImportError:
-    # Fallback if cartesia not installed
     Cartesia = None
+import sys
+
+# Add agents to path
+sys.path.append(os.path.join(os.path.dirname(__file__), "../../../.."))
 from agents.op_agent.op import OpponentAgent
 from agents.coach_agent.coach import CoachAgent
+from agents.scenario_agent.scenario import generate_scenario
 
 logger = logging.getLogger(__name__)
 
@@ -310,30 +315,29 @@ class NegotiationSession:
             # Cartesia voice ID - professional male voice
             voice_id = os.getenv("CARTESIA_VOICE_ID", "a0e99841-438c-4a64-b679-ae501e7d6091")
 
-            # Output format for raw PCM audio
+            # Output format for raw PCM audio (16-bit signed, little-endian)
             output_format = {
                 "container": "raw",
-                "encoding": "pcm_f32le",
+                "encoding": "pcm_s16le",
                 "sample_rate": 44100,
             }
 
-            # Stream audio chunks using SSE (Server-Sent Events)
-            # The new Cartesia SDK returns chunks with .data attribute
+            # Stream audio chunks using SSE
+            # Cartesia SDK returns dict with 'audio' key containing bytes
             for chunk in self.cartesia_client.tts.sse(
-                model_id="sonic-2024-10-01",
+                model_id="sonic-3",
                 transcript=text,
-                voice={"mode": "id", "id": voice_id},
-                language="en",
+                voice_id=voice_id,
                 output_format=output_format,
             ):
-                # New SDK returns chunk objects with .data attribute containing bytes
-                if chunk and hasattr(chunk, 'data') and chunk.data:
-                    audio_base64 = base64.b64encode(chunk.data).decode()
+                audio_bytes = chunk.get("audio") if isinstance(chunk, dict) else chunk
+                if audio_bytes:
+                    audio_base64 = base64.b64encode(audio_bytes).decode()
                     await self.websocket.send_json({
                         "type": "audio_chunk",
                         "data": audio_base64,
                         "sample_rate": 44100,
-                        "encoding": "pcm_f32le"
+                        "encoding": "pcm_s16le"
                     })
 
             # Notify frontend that audio is complete
@@ -567,10 +571,10 @@ async def update_negotiation_scenario_info(session_id: str, scenario_info: str):
     session = get_negotiation_session(session_id)
     if not session:
         return {"error": "Session not found", "session_id": session_id}
-    
+
     scenario_para = generate_scenario(scenario_info)
     logger.info(f"Session {session_id}: Scenario info updated")
-    
+
     return {
         "scenario_paragraph": scenario_para
     }

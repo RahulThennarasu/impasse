@@ -65,41 +65,67 @@ What's Negotiable: {self.negotiable}
 Success Criteria: {self.success_criteria}
 Information Asymmetries: {self.info_asymmetries}
 
-CRITICAL INSTRUCTION - WHEN TO SPEAK:
-
-You must ONLY provide a tip when one of these HIGH-STAKES situations occurs:
-
-1. CRITICAL MISTAKE - The user just made a serious error that will hurt their position:
-   - Revealed their BATNA, deadline, or bottom line unnecessarily
-   - Made a major unreciprocated concession (gave something significant, got nothing)
-   - Accepted or is about to accept a deal clearly below their BATNA
-   - Showed desperation or emotional weakness that damaged their leverage
-
-2. MAJOR TACTICAL MOMENT - A pivotal shift that requires immediate action:
-   - The opponent just revealed a critical weakness, constraint, or pressure point that the user can exploit
-   - The opponent contradicted themselves in a way that exposes a bluff
-   - A clear power shift just occurred (new information changed who has leverage)
-   - The opponent made an unexpectedly large concession signaling they'll go further
-
-3. DECISIVE OPPORTUNITY - A rare window that will close if not acted on NOW:
-   - The opponent signaled flexibility on a key issue the user hasn't pushed on
-   - A creative trade or package deal became possible that wasn't before
-   - The opponent is about to lock in terms the user should challenge first
-
-DO NOT SPEAK for routine negotiation activity:
-- Normal back-and-forth exchanges
-- Standard anchoring (first offers are expected to be extreme)
-- Minor concessions or small adjustments
-- General questions or information gathering
-- Opponent restating their position
-- User making reasonable moves (even if not perfect)
-
-YOUR DEFAULT RESPONSE IS "PASS". Only break silence for game-changing moments.
-
-When you DO speak, format as:
+When you speak, format as:
 "💡 [2-3 word label]: [One sentence explaining what just happened and why it matters]. Say: \"[Exact words the user can say next]\""
 
-Keep it under 200 characters total. The user needs to act fast—no lengthy explanations."""
+Keep it under 200 characters total. The user needs to act fast—no lengthy explanations.
+
+If nothing warrants a tip, respond with just "PASS"."""
+
+    def _get_phase_instructions(self, turn_number: int) -> str:
+        """Returns coaching instructions based on negotiation phase."""
+        if turn_number <= 3:
+            # Early phase: Be very active and helpful
+            return """EARLY NEGOTIATION PHASE - Be an active guide!
+
+Provide tips frequently to help the user establish a strong foundation. Speak up for:
+- Opening positioning tips (how to anchor effectively)
+- Reminders about their objectives and what to prioritize
+- Identifying opponent's opening tactics and how to counter
+- Encouraging information gathering before committing
+- Any early mistakes that could set a bad precedent
+- Opportunities to establish credibility and rapport
+
+Be generous with guidance - the user is just getting started and needs support."""
+
+        elif turn_number <= 6:
+            # Mid-early phase: Moderately active
+            return """MID-EARLY NEGOTIATION PHASE - Stay engaged but more selective.
+
+Provide tips when you see:
+- The opponent revealing constraints or priorities worth noting
+- Missed opportunities to ask probing questions
+- Concession patterns forming (either side)
+- Tactical moves the user should recognize and counter
+- Good moments to introduce new negotiable items
+- Signs the user is giving ground too quickly
+
+Be helpful but let the user find their rhythm."""
+
+        elif turn_number <= 10:
+            # Mid-late phase: More selective
+            return """MID-LATE NEGOTIATION PHASE - Be selective, focus on key moments.
+
+Only speak for significant developments:
+- Major tactical shifts or power dynamics changing
+- Clear opportunities being missed
+- The opponent signaling flexibility on key issues
+- Momentum shifting against the user
+- Critical mistakes that could hurt the final outcome
+
+Let the user handle routine exchanges independently."""
+
+        else:
+            # Late phase: Only critical moments
+            return """LATE NEGOTIATION PHASE - Intervene only for critical moments.
+
+The negotiation is mature. Only speak for game-changing situations:
+- Final deal terms that fall below BATNA
+- Last-chance opportunities before closing
+- Critical errors that would significantly hurt the outcome
+- The opponent making a major concession worth capitalizing on
+
+Trust the user to handle the endgame. Your default response is "PASS"."""
 
     def analyze_turn(self, transcript: List[Dict]) -> Optional[str]:
         """
@@ -119,13 +145,21 @@ Keep it under 200 characters total. The user needs to act fast—no lengthy expl
         # Get last 6 messages (3 exchanges) for better context on patterns
         recent_messages = transcript[-6:] if len(transcript) >= 6 else transcript
 
-        # Build a focused analysis prompt that emphasizes selectivity
-        analysis_prompt = f"""Review this exchange and determine if there is a CRITICAL moment requiring intervention.
+        # Determine current turn number from transcript
+        current_turn = len(transcript) // 2  # Approximate turn count (2 messages per turn)
+        if transcript and "turn" in transcript[-1]:
+            current_turn = transcript[-1]["turn"]
+
+        # Get phase-appropriate instructions
+        phase_instructions = self._get_phase_instructions(current_turn)
+
+        # Build analysis prompt with phase context
+        analysis_prompt = f"""{phase_instructions}
 
 RECENT EXCHANGE:
 {self._format_transcript(recent_messages)}
 
-Remember: Respond "PASS" unless this is a game-changing mistake, major tactical shift, or decisive opportunity that will significantly alter the negotiation outcome. Routine exchanges get "PASS"."""
+Based on the phase instructions above, decide whether to provide a tip or respond "PASS"."""
 
         response = self._create_completion(
             model=self.model,
@@ -133,7 +167,7 @@ Remember: Respond "PASS" unless this is a game-changing mistake, major tactical 
                 {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": analysis_prompt}
             ],
-            temperature=0.3,  # Lower temperature for more consistent, conservative responses
+            temperature=0.4,  # Slightly higher for more varied early-phase responses
             max_tokens=self.max_tip_tokens,
         )
 

@@ -286,6 +286,38 @@ class NegotiationSession:
         ]
         return any(phrase in lowered for phrase in closing_phrases)
 
+    def _is_walkaway(self, opponent_response: str) -> bool:
+        """Check if opponent's response indicates they are walking away from the negotiation."""
+        lowered = opponent_response.lower()
+        # Phrases indicating opponent is walking away
+        walkaway_phrases = [
+            "walk away",
+            "walking away",
+            "have to pass",
+            "going to pass",
+            "i'll pass",
+            "i'm going to have to pass",
+            "not going to work",
+            "isn't going to work",
+            "can't make this work",
+            "too far apart",
+            "explore other options",
+            "other options that work better",
+            "pursue other opportunities",
+            "look elsewhere",
+            "end this conversation",
+            "we're done here",
+            "i'm done",
+            "this conversation is over",
+            "not interested anymore",
+            "no longer interested",
+            "withdrawing my offer",
+            "rescind my offer",
+            "off the table",
+            "taking my business elsewhere",
+        ]
+        return any(phrase in lowered for phrase in walkaway_phrases)
+
     def _get_closing_message(self) -> str:
         """Generate a brief closing message from the opponent."""
         closing_messages = [
@@ -391,6 +423,33 @@ class NegotiationSession:
                 })
                 self.closed = True
                 # Don't close websocket here - let frontend handle cleanup after audio plays
+                return
+
+            # Check if opponent walked away from the negotiation
+            if self._is_walkaway(opponent_response):
+                logger.info(f"Session {self.session_id}: Opponent walked away from negotiation")
+                final_advice = self.coach.get_final_advice(self.opponent.transcript)
+                hidden_state = self.opponent.get_hidden_state()
+
+                # Store session data for post-mortem analysis
+                store_session_data(self.session_id, {
+                    "transcript": self.opponent.transcript,
+                    "opponent_config": self.scenario_data.get("opponent", {}),
+                    "coach_config": self.scenario_data.get("coach", {}),
+                    "hidden_state": hidden_state,
+                    "final_advice": final_advice,
+                })
+
+                # Send negotiation complete with walkaway flag
+                await self.websocket.send_json({
+                    "type": "negotiation_complete",
+                    "final_advice": final_advice,
+                    "hidden_state": hidden_state,
+                    "transcript": self.opponent.transcript,
+                    "auto_ended": True,
+                    "walked_away": True
+                })
+                self.closed = True
                 return
 
             # Coach tips: show after the first opponent reply for the next 3 turns,

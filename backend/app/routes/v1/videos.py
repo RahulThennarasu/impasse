@@ -55,11 +55,13 @@ class PresignedUrlResponse(BaseModel):
 class UploadConfirmRequest(BaseModel):
     session_id: str
     video_key: str
+    is_public: bool = False
 
 
 class UploadConfirmResponse(BaseModel):
     success: bool
     video_url: str
+    is_public: bool
 
 
 @videos_router.post("/presigned-url", response_model=PresignedUrlResponse)
@@ -101,13 +103,25 @@ async def get_presigned_upload_url(request: PresignedUrlRequest):
         )
 
 
+def get_supabase_client():
+    """Initialize and return a Supabase client for video metadata storage."""
+    if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
+        return None
+    try:
+        from supabase import create_client
+        return create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+    except Exception as e:
+        logger.warning(f"Supabase client unavailable: {e}")
+        return None
+
+
 @videos_router.post("/confirm-upload", response_model=UploadConfirmResponse)
 async def confirm_upload(request: UploadConfirmRequest):
     """
     Confirm that a video upload completed successfully.
 
-    This endpoint verifies the object exists in S3 and returns
-    the final video URL for storage in the session record.
+    This endpoint verifies the object exists in S3, stores the video
+    metadata in Supabase with the public flag, and returns the final video URL.
     """
     s3_client = get_s3_client()
 
@@ -119,11 +133,38 @@ async def confirm_upload(request: UploadConfirmRequest):
 
         video_url = f"https://{settings.S3_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/{request.video_key}"
 
-        logger.info(f"Confirmed upload for session {request.session_id}")
+        # Store video metadata in Supabase with public flag
+        supabase = get_supabase_client()
+        if supabase:
+            try:
+                # Check if record already exists
+                existing = supabase.table("videos").select("*").eq("uuid", request.session_id).execute()
+
+                if existing.data and len(existing.data) > 0:
+                    # Update existing record
+                    supabase.table("videos").update({
+                        "link": video_url,
+                        "public": request.is_public
+                    }).eq("uuid", request.session_id).execute()
+                    logger.info(f"Updated video record for session {request.session_id} (public={request.is_public})")
+                else:
+                    # Insert new record
+                    supabase.table("videos").insert({
+                        "uuid": request.session_id,
+                        "link": video_url,
+                        "public": request.is_public
+                    }).execute()
+                    logger.info(f"Created video record for session {request.session_id} (public={request.is_public})")
+            except Exception as db_error:
+                logger.warning(f"Failed to store video metadata in database: {db_error}")
+                # Continue even if database storage fails - the video is still in S3
+
+        logger.info(f"Confirmed upload for session {request.session_id} (public={request.is_public})")
 
         return UploadConfirmResponse(
             success=True,
             video_url=video_url,
+            is_public=request.is_public,
         )
 
     except ClientError as e:

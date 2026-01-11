@@ -599,11 +599,11 @@ export function NegotiationClient() {
     setIsUploadModalOpen(true);
   }, [callRemaining, endCall]);
 
-  const handleUpload = useCallback(async () => {
+  const handleUpload = useCallback(async (isPublic: boolean) => {
     if (!recordedBlob || !sessionId) {
       throw new Error("No recording available");
     }
-    await uploadNegotiationVideo(sessionId, recordedBlob);
+    await uploadNegotiationVideo(sessionId, recordedBlob, isPublic);
   }, [recordedBlob, sessionId]);
 
   const handleNavigateToPostMortem = useCallback(async () => {

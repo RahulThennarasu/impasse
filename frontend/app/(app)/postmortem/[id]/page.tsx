@@ -35,14 +35,20 @@ const fallbackAnalysis: PostMortemResult = {
 };
 
 type PageProps = {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 };
 
 export default async function PostMortemPage({ params }: PageProps) {
+  const { id } = await params;
+
   let analysis = fallbackAnalysis;
+  let usedFallback = false;
+
   try {
-    analysis = await fetchPostMortem(params.id);
-  } catch {
+    analysis = await fetchPostMortem(id);
+  } catch (error) {
+    console.error("Failed to fetch post-mortem analysis:", error);
+    usedFallback = true;
     analysis = fallbackAnalysis;
   }
 
@@ -52,6 +58,11 @@ export default async function PostMortemPage({ params }: PageProps) {
 
       <div className="mx-auto flex max-w-6xl flex-col gap-8 px-6 pb-20 pt-12">
         <PostMortemHeader />
+        {usedFallback && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Analysis is still being generated. Showing sample results. Refresh the page in a few moments.
+          </div>
+        )}
         <PostMortemScore score={analysis.overallScore} />
         <PostMortemPanels strengths={analysis.strengths} improvements={analysis.improvements} />
         <PostMortemMoments moments={analysis.keyMoments} />

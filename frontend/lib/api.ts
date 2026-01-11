@@ -102,6 +102,15 @@ export async function fetchVideoLinks() {
   return (await response.json()) as { videos: VideoLink[] };
 }
 
+export class PostMortemError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+    this.name = "PostMortemError";
+  }
+}
+
 export async function requestPostMortem(sessionId: string) {
   const response = await fetch(`${getApiBaseUrl()}/post_mortem`, {
     method: "POST",
@@ -110,7 +119,10 @@ export async function requestPostMortem(sessionId: string) {
   });
 
   if (!response.ok) {
-    throw new Error("Post-mortem request failed");
+    throw new PostMortemError(
+      `Post-mortem request failed: ${response.statusText}`,
+      response.status
+    );
   }
 
   return response.json();

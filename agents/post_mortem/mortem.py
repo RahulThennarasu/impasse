@@ -164,7 +164,7 @@ Return ONLY valid JSON, no other text."""
                 {"role": "user", "content": analysis_prompt}
             ],
             temperature=0.4,  # Lower for consistent structured output
-            max_tokens=int(os.getenv("GROQ_POST_MORTEM_TOKENS", "1200")),
+            max_tokens=int(os.getenv("GROQ_POST_MORTEM_TOKENS", "4000")),
         )
 
         result = response.choices[0].message.content.strip()

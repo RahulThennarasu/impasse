@@ -351,6 +351,33 @@ async def request_post_mortem(request: PostMortemRequest):
         coach_config = session_data.get("coach_config", {})
         hidden_state = session_data.get("hidden_state", {})
 
+        # Validate transcript is not empty
+        if not transcript or len(transcript) == 0:
+            logger.warning(f"Empty transcript for session {session_id}, returning default analysis")
+            # Return a default analysis for empty transcripts
+            default_result = {
+                "overallScore": 50,
+                "strengths": ["Session started but no conversation was recorded."],
+                "improvements": ["Try having a longer conversation to get detailed feedback."],
+                "metrics": [
+                    {"label": "Communication", "score": 50, "change": 0},
+                    {"label": "Strategy", "score": 50, "change": 0},
+                    {"label": "Persuasion", "score": 50, "change": 0},
+                    {"label": "Listening", "score": 50, "change": 0},
+                    {"label": "Confidence", "score": 50, "change": 0},
+                    {"label": "Adaptability", "score": 50, "change": 0},
+                ],
+                "keyMoments": [],
+            }
+            _analysis_store[session_id] = {
+                "raw_analysis": {"empty_transcript": True},
+                "frontend_result": default_result,
+                "summary_text": "No conversation was recorded for this session.",
+                "opponent_reveal": "The opponent's strategy was not revealed as no negotiation took place.",
+            }
+            persist_postmortem_to_db(session_id, default_result, session_data.get("video_url"))
+            return {"status": "complete", "session_id": session_id}
+
         # Build user briefing from coach config
         user_briefing = {
             "objectives": coach_config.get("user_objectives", {}),

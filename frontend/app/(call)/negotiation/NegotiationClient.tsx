@@ -12,6 +12,7 @@ import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import {
   getWsBaseUrl,
   requestPostMortem,
+  PostMortemError,
   startMultipartUpload,
   getPartUploadUrl,
   uploadPart,
@@ -121,6 +122,8 @@ export function NegotiationClient() {
   const rafRef = useRef<number | null>(null);
   const autoEndRef = useRef(false);
   const negotiationCompleteRef = useRef(false);
+  const sessionDataStoredRef = useRef(false);
+  const sessionDataStoredResolveRef = useRef<((value: boolean) => void) | null>(null);
   const ttsSourcesRef = useRef<AudioBufferSourceNode[]>([]);
   const isTtsPlayingRef = useRef(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -319,7 +322,7 @@ export function NegotiationClient() {
   }, [phase]);
 
   const requestPostMortemWithRetry = useCallback(
-    async (attempts: number = 4, delayMs: number = 800) => {
+    async (attempts: number = 6, initialDelayMs: number = 1000) => {
       if (!sessionId) return;
       let lastError: unknown;
       for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -329,7 +332,14 @@ export function NegotiationClient() {
         } catch (error) {
           lastError = error;
           if (attempt < attempts - 1) {
-            await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+            // For 404 errors (session not found), use longer exponential backoff
+            // as the backend may still be processing the session data
+            const is404 = error instanceof PostMortemError && error.status === 404;
+            const delay = is404
+              ? initialDelayMs * Math.pow(2, attempt) // exponential: 1s, 2s, 4s, 8s...
+              : initialDelayMs; // constant delay for other errors
+            console.log(`Post-mortem attempt ${attempt + 1} failed (${is404 ? "404" : "error"}), retrying in ${delay}ms...`);
+            await new Promise((resolve) => window.setTimeout(resolve, delay));
           }
         }
       }
@@ -337,6 +347,39 @@ export function NegotiationClient() {
     },
     [sessionId]
   );
+
+  /**
+   * Wait for the backend to confirm session data is stored.
+   * This is triggered when we receive the negotiation_complete WebSocket message.
+   */
+  const waitForSessionDataStored = useCallback((timeoutMs: number = 10000) => {
+    // If already stored, resolve immediately
+    if (sessionDataStoredRef.current) {
+      return Promise.resolve(true);
+    }
+
+    // If WebSocket is not open, we can't wait
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      console.warn("WebSocket not open, cannot wait for session data");
+      return Promise.resolve(false);
+    }
+
+    return new Promise<boolean>((resolve) => {
+      const timer = window.setTimeout(() => {
+        console.warn("Timeout waiting for session data to be stored");
+        if (sessionDataStoredResolveRef.current === resolve) {
+          sessionDataStoredResolveRef.current = null;
+        }
+        resolve(false);
+      }, timeoutMs);
+
+      sessionDataStoredResolveRef.current = (value: boolean) => {
+        window.clearTimeout(timer);
+        sessionDataStoredResolveRef.current = null;
+        resolve(value);
+      };
+    });
+  }, []);
 
   /**
    * Complete post-mortem workflow:
@@ -558,6 +601,8 @@ export function NegotiationClient() {
   useEffect(() => {
     if (!sessionId || phase !== "call") return;
     negotiationCompleteRef.current = false;
+    sessionDataStoredRef.current = false;
+    sessionDataStoredResolveRef.current = null;
     const wsUrl = `${getWsBaseUrl()}/api/v1/ws/negotiation/${sessionId}`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
@@ -695,6 +740,10 @@ export function NegotiationClient() {
         if (data.type === "negotiation_complete") {
           // Mark negotiation as complete - will show visibility dialog after audio finishes
           negotiationCompleteRef.current = true;
+          // Mark that session data has been stored by the backend
+          sessionDataStoredRef.current = true;
+          // Resolve any pending waitForSessionDataStored promise
+          sessionDataStoredResolveRef.current?.(true);
           // Show a brief "Deal closed!" status
           setCoachSuggestions((prev) => [
             {
@@ -800,15 +849,19 @@ export function NegotiationClient() {
       mediaRecorderRef.current.stop();
     }
 
+    // Send end_negotiation message to backend - this triggers store_session_data
     if (wsRef.current) {
       wsRef.current.send(JSON.stringify({ type: "end_negotiation" }));
     }
 
-    // Wait briefly for final upload, then show visibility dialog
-    window.setTimeout(() => {
+    // Wait for backend to confirm session data is stored before showing dialog
+    void (async () => {
+      await waitForSessionDataStored();
+      // Small additional delay for final video part upload
+      await new Promise((resolve) => window.setTimeout(resolve, 500));
       setShowVisibilityDialog(true);
-    }, 500);
-  }, [stream]);
+    })();
+  }, [stream, waitForSessionDataStored]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);

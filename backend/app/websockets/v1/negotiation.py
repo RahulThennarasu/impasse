@@ -829,6 +829,10 @@ class VideoLinksResponse(BaseModel):
     videos: List[dict]
 
 
+class VideoTitleUpdate(BaseModel):
+    title: str
+
+
 @negotiation_router.post("/videos/session", response_model=VideoSessionResponse)
 async def create_video_session(request: VideoSessionRequest):
     """
@@ -845,7 +849,8 @@ async def create_video_session(request: VideoSessionRequest):
         # Insert the new video session into the database
         response = supabase.table("recordings").insert({
             # "id": session_id,
-            "link": request.link
+            "link": request.link,
+            "public": False,
         }).execute()
         # print("Response data", response.data)
         session_id = response.data[0].get("id")
@@ -874,7 +879,7 @@ async def create_video_session(request: VideoSessionRequest):
 
 
 @negotiation_router.get("/videos/links", response_model=VideoLinksResponse)
-async def get_all_video_links():
+async def get_all_video_links(public_only: bool = False):
     """
     Retrieve all video links from the Supabase videos table.
     
@@ -883,8 +888,11 @@ async def get_all_video_links():
     try:
         supabase = get_supabase_client()
         
-        # Fetch all video records from the database
-        response = supabase.table("recordings").select("*").execute()
+        # Fetch video records from the database
+        query = supabase.table("recordings").select("*")
+        if public_only:
+            query = query.eq("public", True)
+        response = query.execute()
         
         logger.info(f"Retrieved {len(response.data)} video records")
 
@@ -897,6 +905,24 @@ async def get_all_video_links():
         raise HTTPException(
             status_code=500,
             detail="Failed to retrieve video links"
+        )
+
+
+@negotiation_router.patch("/videos/{session_id}/title")
+async def update_video_title(session_id: str, data: VideoTitleUpdate):
+    """
+    Update the title for a video session.
+    """
+    try:
+        supabase = get_supabase_client()
+        update_data = {"title": data.title.strip()}
+        supabase.table("recordings").update(update_data).eq("id", session_id).execute()
+        return {"status": "updated", "session_id": session_id}
+    except Exception as e:
+        logger.error(f"Failed to update video title for session {session_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to update video title"
         )
 
 

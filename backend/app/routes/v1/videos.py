@@ -194,8 +194,8 @@ async def confirm_upload(request: UploadConfirmRequest):
         supabase = get_supabase_client()
         if supabase:
             try:
-                # Check if record already exists in videos table
-                existing = supabase.table("videos").select("*").eq("uuid", request.session_id).execute()
+                # Check if record already exists in recordings table
+                existing = supabase.table("recordings").select("*").eq("id", request.session_id).execute()
 
                 video_data = {
                     "link": presigned_url,
@@ -205,12 +205,12 @@ async def confirm_upload(request: UploadConfirmRequest):
 
                 if existing.data and len(existing.data) > 0:
                     # Update existing record with presigned URL
-                    supabase.table("videos").update(video_data).eq("uuid", request.session_id).execute()
+                    supabase.table("recordings").update(video_data).eq("id", request.session_id).execute()
                     logger.info(f"Updated video record for session {request.session_id} (public={request.is_public})")
                 else:
                     # Insert new record with presigned URL
-                    video_data["uuid"] = request.session_id
-                    supabase.table("videos").insert(video_data).execute()
+                    video_data["id"] = request.session_id
+                    supabase.table("recordings").insert(video_data).execute()
                     logger.info(f"Created video record for session {request.session_id} (public={request.is_public})")
             except Exception as db_error:
                 logger.warning(f"Failed to store video metadata in database: {db_error}")
@@ -391,17 +391,17 @@ async def complete_multipart_upload(request: CompleteMultipartRequest):
         supabase = get_supabase_client()
         if supabase:
             try:
-                existing = supabase.table("videos").select("*").eq("uuid", request.session_id).execute()
+                existing = supabase.table("recordings").select("*").eq("id", request.session_id).execute()
                 video_data = {
                     "link": presigned_url,
                     "public": request.is_public,
                     "video_key": video_key,
                 }
                 if existing.data and len(existing.data) > 0:
-                    supabase.table("videos").update(video_data).eq("uuid", request.session_id).execute()
+                    supabase.table("recordings").update(video_data).eq("id", request.session_id).execute()
                 else:
-                    video_data["uuid"] = request.session_id
-                    supabase.table("videos").insert(video_data).execute()
+                    video_data["id"] = request.session_id
+                    supabase.table("recordings").insert(video_data).execute()
                 logger.info(f"Stored video metadata for session {request.session_id}")
             except Exception as db_error:
                 logger.warning(f"Failed to store video metadata: {db_error}")

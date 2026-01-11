@@ -18,6 +18,8 @@ import os
 import base64
 import sys
 import httpx
+import uuid
+from datetime import datetime
 from typing import Dict, Optional, List
 
 # Add agents to path
@@ -27,7 +29,11 @@ from pydantic import BaseModel
 from supabase import create_client, Client
 from app.core.config import settings
 from agents.scenario_agent.scenario import generate_scenario
-from deepgram import DeepgramClient, DeepgramClientOptions, LiveOptions, LiveTranscriptionEvents
+from deepgram import DeepgramClient
+from deepgram.core.events import EventType
+from deepgram.listen.v1.raw_client import AsyncRawV1Client
+from deepgram.listen.v1.socket_client import AsyncV1SocketClient
+from deepgram.listen.v1.types.listen_v1results import ListenV1Results
 try:
     from cartesia import Cartesia
 except ImportError:
@@ -35,6 +41,7 @@ except ImportError:
 
 from agents.op_agent.op import OpponentAgent
 from agents.coach_agent.coach import CoachAgent
+from app.routes.v1.postmortem import store_session_data
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +55,15 @@ def get_supabase_client() -> Client:
             status_code=500,
             detail="Supabase credentials not configured"
         )
-    return create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+    try:
+        from supabase import create_client
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Supabase client unavailable: {e}"
+        )
+
+    return create_client(settings.SUPABASE_URL, settings.SUPABASE_API_KEY)
 
 
 class NegotiationSession:
@@ -76,17 +91,19 @@ class NegotiationSession:
 
         # Deepgram client for STT
         try:
-            config = DeepgramClientOptions(
-                api_key=os.getenv("DEEPGRAM_API_KEY"),
-                options={"ssl_verify": False}
-            )
-            self.deepgram = DeepgramClient("", config)
-            self.dg_connection = None
+            self.deepgram = DeepgramClient(api_key=os.getenv("DEEPGRAM_API_KEY"))
+            self.dg_raw_client = AsyncRawV1Client(client_wrapper=self.deepgram._client_wrapper)
+            self.dg_connection: Optional[AsyncV1SocketClient] = None
+            self.dg_connection_ctx = None
+            self.dg_task: Optional[asyncio.Task] = None
             self.dg_connected = False
         except Exception as e:
             logger.error(f"Failed to initialize Deepgram: {e}")
             self.deepgram = None
+            self.dg_raw_client = None
             self.dg_connection = None
+            self.dg_connection_ctx = None
+            self.dg_task = None
             self.dg_connected = False
 
         # Cartesia client for TTS
@@ -134,89 +151,68 @@ class NegotiationSession:
     async def connect_deepgram(self):
         """Establish connection to Deepgram for live transcription"""
         try:
-            if not self.deepgram:
+            if not self.deepgram or not self.dg_raw_client:
                 return False
-
-            options = LiveOptions(
-                model="nova-2",
-                language="en-US",
-                encoding="linear16",
-                sample_rate=16000,
-                channels=1,
-                interim_results=True,
-                endpointing=5000,
-            )
-
-            self.dg_connection = self.deepgram.listen.websocket.v("1")
-
-            self.dg_connection.on(LiveTranscriptionEvents.Open, self.on_deepgram_open)
-            self.dg_connection.on(LiveTranscriptionEvents.Transcript, self.on_deepgram_message)
-            self.dg_connection.on(LiveTranscriptionEvents.UtteranceEnd, self.on_utterance_end)
-            self.dg_connection.on(LiveTranscriptionEvents.Error, self.on_deepgram_error)
-            self.dg_connection.on(LiveTranscriptionEvents.Close, self.on_deepgram_close)
 
             logger.info(f"Session {self.session_id}: Starting Deepgram connection...")
 
-            result = self.dg_connection.start(options)
-            if not result:
-                logger.error(f"Session {self.session_id}: Failed to start Deepgram connection")
-                return False
+            self.dg_connection_ctx = self.dg_raw_client.connect(
+                model="nova-2",
+                language="en-US",
+                encoding="linear16",
+                sample_rate="16000",
+                channels="1",
+                interim_results="true",
+                endpointing="5000",
+            )
+            self.dg_connection = await self.dg_connection_ctx.__aenter__()
 
-            logger.info(f"Session {self.session_id}: Deepgram start() returned True")
+            self.dg_connection.on(EventType.OPEN, self.on_deepgram_open)
+            self.dg_connection.on(EventType.MESSAGE, self.on_deepgram_message)
+            self.dg_connection.on(EventType.ERROR, self.on_deepgram_error)
+            self.dg_connection.on(EventType.CLOSE, self.on_deepgram_close)
+
+            self.dg_task = asyncio.create_task(self.dg_connection.start_listening())
+            self.dg_connected = True
+            logger.info(f"Session {self.session_id}: Deepgram connection established")
             return True
 
         except Exception as e:
             logger.error(f"Session {self.session_id}: Deepgram connection error: {e}")
             return False
 
-    def on_deepgram_message(self, *args, **kwargs):
+    def on_deepgram_message(self, result: object):
         """Handle transcription messages from Deepgram"""
         try:
-            result = kwargs.get("result")
-            if not result:
-                logger.warning(f"Session {self.session_id}: No result in Deepgram callback")
+            if not isinstance(result, ListenV1Results):
                 return
 
-            if hasattr(result, 'channel'):
-                alternatives = result.channel.alternatives
-                if alternatives and len(alternatives) > 0:
-                    transcript = alternatives[0].transcript
-                    is_final = result.is_final if hasattr(result, 'is_final') else True
+            alternatives = result.channel.alternatives
+            if not alternatives:
+                return
 
-                    if transcript:
-                        logger.info(f"Session {self.session_id}: Transcription: '{transcript}' (final={is_final})")
+            transcript = alternatives[0].transcript
+            is_final = bool(result.is_final)
 
-                        if self.websocket and self.loop:
-                            asyncio.run_coroutine_threadsafe(
-                                self.websocket.send_json({
-                                    "type": "transcription",
-                                    "text": transcript,
-                                    "is_final": is_final
-                                }),
-                                self.loop
-                            )
+            if transcript:
+                logger.info(
+                    f"Session {self.session_id}: Transcription: '{transcript}' (final={is_final})"
+                )
 
-                        if transcript.strip():
-                            self.current_transcription = transcript
-                            self.pending_transcript = transcript
-                            self._schedule_transcript_flush()
-            elif hasattr(result, "transcript"):
-                transcript = result.transcript
-                if transcript:
-                    logger.info(f"Session {self.session_id}: Transcription: '{transcript}' (alt)")
-                    if self.websocket and self.loop:
-                        asyncio.run_coroutine_threadsafe(
-                            self.websocket.send_json({
-                                "type": "transcription",
-                                "text": transcript,
-                                "is_final": True
-                            }),
-                            self.loop
-                        )
-                    if transcript.strip():
-                        self.current_transcription = transcript
-                        self.pending_transcript = transcript
-                        self._schedule_transcript_flush()
+                if self.websocket and self.loop:
+                    asyncio.run_coroutine_threadsafe(
+                        self.websocket.send_json({
+                            "type": "transcription",
+                            "text": transcript,
+                            "is_final": is_final
+                        }),
+                        self.loop
+                    )
+
+                if transcript.strip():
+                    self.current_transcription = transcript
+                    self.pending_transcript = transcript
+                    self._schedule_transcript_flush()
 
         except Exception as e:
             logger.error(f"Session {self.session_id}: Error processing transcript: {e}", exc_info=True)
@@ -254,9 +250,25 @@ class NegotiationSession:
         """Process user's message through opponent and coach agents"""
         try:
             if self._is_acceptance(user_text):
-                self.opponent.transcript.append({"role": "user", "content": user_text})
+                self.opponent.current_turn += 1
+                self.opponent.transcript.append({
+                    "role": "user",
+                    "content": user_text,
+                    "timestamp": datetime.now().isoformat(),
+                    "turn": self.opponent.current_turn
+                })
                 final_advice = self.coach.get_final_advice(self.opponent.transcript)
                 hidden_state = self.opponent.get_hidden_state()
+
+                # Store session data for post-mortem analysis
+                store_session_data(self.session_id, {
+                    "transcript": self.opponent.transcript,
+                    "opponent_config": self.scenario_data.get("opponent", {}),
+                    "coach_config": self.scenario_data.get("coach", {}),
+                    "hidden_state": hidden_state,
+                    "final_advice": final_advice,
+                })
+
                 await self.websocket.send_json({
                     "type": "negotiation_complete",
                     "final_advice": final_advice,
@@ -279,6 +291,32 @@ class NegotiationSession:
 
             # Generate audio from opponent response
             await self.generate_and_stream_audio(opponent_response)
+
+            # Check if opponent closed the deal
+            if self._is_deal_closed(opponent_response):
+                logger.info(f"Session {self.session_id}: Deal closed by opponent")
+                final_advice = self.coach.get_final_advice(self.opponent.transcript)
+                hidden_state = self.opponent.get_hidden_state()
+
+                # Store session data for post-mortem analysis
+                store_session_data(self.session_id, {
+                    "transcript": self.opponent.transcript,
+                    "opponent_config": self.scenario_data.get("opponent", {}),
+                    "coach_config": self.scenario_data.get("coach", {}),
+                    "hidden_state": hidden_state,
+                    "final_advice": final_advice,
+                })
+
+                await self.websocket.send_json({
+                    "type": "negotiation_complete",
+                    "final_advice": final_advice,
+                    "hidden_state": hidden_state,
+                    "transcript": self.opponent.transcript,
+                    "auto_ended": True
+                })
+                self.closed = True
+                await self.websocket.close()
+                return
 
             # Get coach analysis on a reduced cadence; only forward short actionable tips
             self.user_turns += 1
@@ -422,7 +460,7 @@ class NegotiationSession:
             if not self.received_audio:
                 logger.info(f"Session {self.session_id}: Received audio bytes ({len(audio_data)})")
                 self.received_audio = True
-            self.dg_connection.send(audio_data)
+            await self.dg_connection.send_media(audio_data)
 
     def _is_acceptance(self, text: str) -> bool:
         lowered = text.lower().strip()
@@ -478,8 +516,12 @@ class NegotiationSession:
 
     async def cleanup(self):
         """Clean up session resources"""
-        if self.dg_connection:
-            self.dg_connection.finish()
+        if self.dg_task:
+            self.dg_task.cancel()
+            self.dg_task = None
+        if self.dg_connection_ctx:
+            await self.dg_connection_ctx.__aexit__(None, None, None)
+            self.dg_connection_ctx = None
         self.dg_connection = None
         self.dg_connected = False
         logger.info(f"Session {self.session_id}: Cleaned up")
@@ -562,6 +604,15 @@ async def websocket_negotiation(websocket: WebSocket, session_id: str):
                     # Get final analysis from coach
                     final_advice = session.coach.get_final_advice(session.opponent.transcript)
                     hidden_state = session.opponent.get_hidden_state()
+
+                    # Store session data for post-mortem analysis
+                    store_session_data(session_id, {
+                        "transcript": session.opponent.transcript,
+                        "opponent_config": session.scenario_data.get("opponent", {}),
+                        "coach_config": session.scenario_data.get("coach", {}),
+                        "hidden_state": hidden_state,
+                        "final_advice": final_advice,
+                    })
 
                     await websocket.send_json({
                         "type": "negotiation_complete",
@@ -682,18 +733,20 @@ async def create_video_session(request: VideoSessionRequest):
         supabase = get_supabase_client()
         
         # Generate a new UUID for the session
-        session_id = str(uuid.uuid4())
+        # session_id = str(uuid.uuid4())
         
         # Insert the new video session into the database
-        response = supabase.table("videos").insert({
-            "uuid": session_id,
+        response = supabase.table("recordings").insert({
+            # "id": session_id,
             "link": request.link
         }).execute()
+        # print("Response data", response.data)
+        session_id = response.data[0].get("id")
         
-        logger.info(f"Created video session: {session_id}")
+        # logger.info(f"Created video session: {session_id}")
         
         # Extract created_at from the response
-        if response.data and len(response.data) > 0:
+        if response.data and len(response.data) > 0 and response.data[0]:
             created_at = response.data[0].get("created_at", "")
             return VideoSessionResponse(
                 session_id=session_id,
@@ -724,10 +777,10 @@ async def get_all_video_links():
         supabase = get_supabase_client()
         
         # Fetch all video records from the database
-        response = supabase.table("videos").select("*").execute()
+        response = supabase.table("recordings").select("*").execute()
         
         logger.info(f"Retrieved {len(response.data)} video records")
-        
+
         return VideoLinksResponse(
             videos=response.data
         )

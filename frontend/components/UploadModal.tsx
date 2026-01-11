@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from "@headlessui/react";
-import { Upload, X, Check, Loader2, Share2 } from "lucide-react";
+import { Upload, X, Check, Loader2, Share2, Lock, Globe } from "lucide-react";
 
 type UploadModalProps = {
   isOpen: boolean;
   onClose: () => void;
-  onConfirmUpload: () => Promise<void>;
+  onConfirmUpload: (isPublic: boolean) => Promise<void>;
   onSkip: () => void;
   sessionDuration?: string;
 };
@@ -24,13 +24,14 @@ export function UploadModal({
   const [uploadState, setUploadState] = useState<UploadState>("prompt");
   const [uploadProgress, setUploadProgress] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isPublic, setIsPublic] = useState(false);
 
   const handleUpload = async () => {
     setUploadState("uploading");
     setUploadProgress(0);
 
     try {
-      await onConfirmUpload();
+      await onConfirmUpload(isPublic);
       setUploadState("success");
     } catch (error) {
       setUploadState("error");
@@ -43,11 +44,13 @@ export function UploadModal({
     setUploadState("prompt");
     setUploadProgress(0);
     setErrorMessage(null);
+    setIsPublic(false);
     onClose();
   };
 
   const handleSkip = () => {
     setUploadState("prompt");
+    setIsPublic(false);
     onSkip();
   };
 
@@ -61,7 +64,7 @@ export function UploadModal({
             <>
               <div className="mb-4 flex items-center justify-between">
                 <DialogTitle className="text-xl font-bold text-ink">
-                  Share Your Negotiation?
+                  Save Your Negotiation?
                 </DialogTitle>
                 <button
                   onClick={handleClose}
@@ -75,18 +78,54 @@ export function UploadModal({
                 <div className="mb-4 flex items-center gap-3 rounded-xl bg-olive/10 p-4">
                   <Share2 className="text-olive" size={24} />
                   <div>
-                    <p className="font-semibold text-ink">Help others learn</p>
+                    <p className="font-semibold text-ink">Save your recording</p>
                     <p className="text-sm text-muted">
-                      Your negotiation can help other users improve their skills
+                      Upload your negotiation to review later or share with others
                     </p>
                   </div>
                 </div>
 
                 {sessionDuration && (
-                  <p className="text-sm text-muted">
+                  <p className="mb-4 text-sm text-muted">
                     Session duration: <span className="font-medium text-ink">{sessionDuration}</span>
                   </p>
                 )}
+
+                {/* Public/Private Toggle */}
+                <div className="rounded-xl border border-black/10 p-4">
+                  <p className="mb-3 text-sm font-semibold text-ink">Visibility</p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsPublic(false)}
+                      className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-medium transition ${
+                        !isPublic
+                          ? "bg-ink text-white"
+                          : "bg-black/5 text-muted hover:bg-black/10"
+                      }`}
+                    >
+                      <Lock size={16} />
+                      Private
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsPublic(true)}
+                      className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-medium transition ${
+                        isPublic
+                          ? "bg-olive text-white"
+                          : "bg-black/5 text-muted hover:bg-black/10"
+                      }`}
+                    >
+                      <Globe size={16} />
+                      Public
+                    </button>
+                  </div>
+                  <p className="mt-2 text-xs text-muted">
+                    {isPublic
+                      ? "Anyone can view this recording to learn from your negotiation"
+                      : "Only you can access this recording"}
+                  </p>
+                </div>
               </div>
 
               <div className="flex gap-3">
@@ -101,7 +140,7 @@ export function UploadModal({
                   className="flex flex-1 items-center justify-center gap-2 rounded-full bg-ink px-4 py-3 text-sm font-bold text-white transition hover:bg-ink/90"
                 >
                   <Upload size={16} />
-                  Share Recording
+                  Save Recording
                 </button>
               </div>
             </>
@@ -135,7 +174,9 @@ export function UploadModal({
                 Upload Complete!
               </DialogTitle>
               <p className="mb-6 text-sm text-muted">
-                Your negotiation has been shared with the community
+                {isPublic
+                  ? "Your negotiation has been shared with the community"
+                  : "Your negotiation has been saved privately"}
               </p>
               <button
                 onClick={handleClose}

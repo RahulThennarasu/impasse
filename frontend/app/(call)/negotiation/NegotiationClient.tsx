@@ -12,10 +12,8 @@ import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import {
   getWsBaseUrl,
   requestPostMortem,
-  uploadNegotiationVideo,
   type CoachTip,
 } from "@/lib/api";
-import { UploadModal } from "@/components/UploadModal";
 
 const initialCoachSuggestions: CoachTip[] = [
   {
@@ -130,10 +128,7 @@ export function NegotiationClient() {
   const recordedChunksRef = useRef<Blob[]>([]);
 
   const [isMuted, setIsMuted] = useState(false);
-  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isSkipConfirmOpen, setIsSkipConfirmOpen] = useState(false);
-  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
-  const [sessionDuration, setSessionDuration] = useState("");
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [mediaError, setMediaError] = useState<string | null>(null);
@@ -193,11 +188,6 @@ export function NegotiationClient() {
             if (event.data.size > 0) {
               recordedChunksRef.current.push(event.data);
             }
-          };
-
-          mediaRecorder.onstop = () => {
-            const blob = new Blob(recordedChunksRef.current, { type: "video/webm" });
-            setRecordedBlob(blob);
           };
 
           mediaRecorder.start(1000); // Collect data every second
@@ -587,28 +577,15 @@ export function NegotiationClient() {
       mediaRecorderRef.current.stop();
     }
 
-    // Calculate session duration for display
-    setSessionDuration(formatTime(callRemaining));
-
     if (wsRef.current) {
       wsRef.current.send(JSON.stringify({ type: "end_negotiation" }));
     }
     endCall();
 
-    // Show upload modal instead of immediately navigating
-    setIsUploadModalOpen(true);
-  }, [callRemaining, endCall]);
-
-  const handleUpload = useCallback(async () => {
-    if (!recordedBlob || !sessionId) {
-      throw new Error("No recording available");
-    }
-    await uploadNegotiationVideo(sessionId, recordedBlob);
-  }, [recordedBlob, sessionId]);
+    handleNavigateToPostMortem();
+  }, [callRemaining, endCall, handleNavigateToPostMortem]);
 
   const handleNavigateToPostMortem = useCallback(async () => {
-    setIsUploadModalOpen(false);
-
     // Stop all tracks
     stream?.getTracks().forEach((track) => track.stop());
 
@@ -857,13 +834,6 @@ export function NegotiationClient() {
         />
       </main>
 
-      <UploadModal
-        isOpen={isUploadModalOpen}
-        onClose={handleNavigateToPostMortem}
-        onConfirmUpload={handleUpload}
-        onSkip={handleNavigateToPostMortem}
-        sessionDuration={sessionDuration}
-      />
     </div>
   );
 }

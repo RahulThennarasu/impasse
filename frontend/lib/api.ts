@@ -33,6 +33,17 @@ export type PostMortemResult = {
   keyMoments: PostMortemMoment[];
 };
 
+export type VideoSession = {
+  session_id: string;
+  created_at: string;
+};
+
+export type VideoLink = {
+  id: string;
+  link: string;
+  created_at?: string;
+};
+
 const DEFAULT_API_BASE = "http://localhost:8000";
 
 const getApiBaseUrl = () =>
@@ -58,6 +69,32 @@ export async function createScenarioContext(keywords: string) {
   }
 
   return (await response.json()) as ScenarioContext;
+}
+
+export async function createVideoSession(link: string) {
+  const response = await fetch(`${getApiBaseUrl()}/videos/session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ link }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Video session request failed");
+  }
+
+  return (await response.json()) as VideoSession;
+}
+
+export async function fetchVideoLinks() {
+  const response = await fetch(`${getApiBaseUrl()}/videos/links`, {
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error("Video links fetch failed");
+  }
+
+  return (await response.json()) as { videos: VideoLink[] };
 }
 
 export async function requestPostMortem(sessionId: string) {
@@ -102,6 +139,8 @@ export type PresignedUrlResponse = {
 export type UploadConfirmResponse = {
   success: boolean;
   video_url: string;
+  is_public: boolean;
+  expires_in?: number;
 };
 
 /**
@@ -168,7 +207,8 @@ export async function uploadVideoToS3(
  */
 export async function confirmVideoUpload(
   sessionId: string,
-  videoKey: string
+  videoKey: string,
+  isPublic: boolean = false
 ): Promise<UploadConfirmResponse> {
   const response = await fetch(`${getApiBaseUrl()}/videos/confirm-upload`, {
     method: "POST",
@@ -176,6 +216,7 @@ export async function confirmVideoUpload(
     body: JSON.stringify({
       session_id: sessionId,
       video_key: videoKey,
+      is_public: isPublic,
     }),
   });
 
@@ -192,6 +233,7 @@ export async function confirmVideoUpload(
 export async function uploadNegotiationVideo(
   sessionId: string,
   videoBlob: Blob,
+  isPublic: boolean = false,
   onProgress?: (progress: number) => void
 ): Promise<string> {
   // Step 1: Get presigned URL
@@ -203,8 +245,8 @@ export async function uploadNegotiationVideo(
   // Step 2: Upload to S3
   await uploadVideoToS3(upload_url, videoBlob, onProgress);
 
-  // Step 3: Confirm upload
-  const { video_url } = await confirmVideoUpload(sessionId, video_key);
+  // Step 3: Confirm upload with public flag
+  const { video_url } = await confirmVideoUpload(sessionId, video_key, isPublic);
 
   return video_url;
 }
@@ -217,7 +259,7 @@ export async function getVideoDownloadUrl(
   expiresIn: number = 3600
 ): Promise<{ download_url: string; expires_in: number }> {
   const response = await fetch(
-    `${getApiBaseUrl()}/videos/download-url/${sessionId}?expires_in=${expiresIn}`
+    `${getServerApiBaseUrl()}/videos/download-url/${sessionId}?expires_in=${expiresIn}`
   );
 
   if (!response.ok) {

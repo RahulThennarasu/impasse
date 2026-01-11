@@ -23,20 +23,15 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../../../.."))
 
 from pydantic import BaseModel
 from agents.scenario_agent.scenario import generate_scenario
-from deepgram import DeepgramClient
-from deepgram.core.events import EventType
-from deepgram.listen.v1.socket_client import AsyncV1SocketClient
-from deepgram.listen.v1.types.listen_v1results import ListenV1Results
+from deepgram import DeepgramClient, DeepgramClientOptions, LiveOptions
+from deepgram.clients.live.v1 import LiveTranscriptionEvents
 try:
     from cartesia import Cartesia
 except ImportError:
     Cartesia = None
 
-# Add agents to path
-sys.path.append(os.path.join(os.path.dirname(__file__), "../../../.."))
 from agents.op_agent.op import OpponentAgent
 from agents.coach_agent.coach import CoachAgent
-from agents.scenario_agent.scenario import generate_scenario
 
 logger = logging.getLogger(__name__)
 
@@ -68,17 +63,17 @@ class NegotiationSession:
 
         # Deepgram client for STT
         try:
-            self.deepgram = DeepgramClient(api_key=os.getenv("DEEPGRAM_API_KEY"))
-            self.dg_connection: Optional[AsyncV1SocketClient] = None
-            self.dg_connection_ctx = None
-            self.dg_task: Optional[asyncio.Task] = None
+            config = DeepgramClientOptions(
+                api_key=os.getenv("DEEPGRAM_API_KEY"),
+                options={"ssl_verify": False}
+            )
+            self.deepgram = DeepgramClient("", config)
+            self.dg_connection = None
             self.dg_connected = False
         except Exception as e:
             logger.error(f"Failed to initialize Deepgram: {e}")
             self.deepgram = None
             self.dg_connection = None
-            self.dg_connection_ctx = None
-            self.dg_task = None
             self.dg_connected = False
 
         # Cartesia client for TTS
@@ -121,65 +116,70 @@ class NegotiationSession:
         try:
             if not self.deepgram:
                 return False
-            logger.info(f"Session {self.session_id}: Starting Deepgram connection...")
-            self.dg_connection_ctx = self.deepgram.listen.v1.connect(
+
+            options = LiveOptions(
                 model="nova-2",
                 language="en-US",
                 encoding="linear16",
-                sample_rate="16000",
-                channels="1",
-                interim_results="true",
-                endpointing="5000",
+                sample_rate=16000,
+                channels=1,
+                interim_results=True,
+                endpointing=5000,
             )
-            self.dg_connection = await self.dg_connection_ctx.__aenter__()
 
-            # Set up event handlers
-            self.dg_connection.on(EventType.OPEN, self.on_deepgram_open)
-            self.dg_connection.on(EventType.MESSAGE, self.on_deepgram_message)
-            self.dg_connection.on(EventType.ERROR, self.on_deepgram_error)
-            self.dg_connection.on(EventType.CLOSE, self.on_deepgram_close)
+            self.dg_connection = self.deepgram.listen.websocket.v("1")
 
-            self.dg_task = asyncio.create_task(self.dg_connection.start_listening())
-            self.dg_connected = True
-            logger.info(f"Session {self.session_id}: Deepgram connection established")
+            self.dg_connection.on(LiveTranscriptionEvents.Open, self.on_deepgram_open)
+            self.dg_connection.on(LiveTranscriptionEvents.Transcript, self.on_deepgram_message)
+            self.dg_connection.on(LiveTranscriptionEvents.UtteranceEnd, self.on_utterance_end)
+            self.dg_connection.on(LiveTranscriptionEvents.Error, self.on_deepgram_error)
+            self.dg_connection.on(LiveTranscriptionEvents.Close, self.on_deepgram_close)
+
+            logger.info(f"Session {self.session_id}: Starting Deepgram connection...")
+
+            result = self.dg_connection.start(options)
+            if not result:
+                logger.error(f"Session {self.session_id}: Failed to start Deepgram connection")
+                return False
+
+            logger.info(f"Session {self.session_id}: Deepgram start() returned True")
             return True
 
         except Exception as e:
             logger.error(f"Session {self.session_id}: Deepgram connection error: {e}")
             return False
 
-    def on_deepgram_message(self, result: object):
+    def on_deepgram_message(self, *args, **kwargs):
         """Handle transcription messages from Deepgram"""
         try:
-            if not isinstance(result, ListenV1Results):
+            result = kwargs.get("result")
+            if not result:
+                logger.warning(f"Session {self.session_id}: No result in Deepgram callback")
                 return
 
-            alternatives = result.channel.alternatives
-            if not alternatives:
-                return
+            if hasattr(result, 'channel'):
+                alternatives = result.channel.alternatives
+                if alternatives and len(alternatives) > 0:
+                    transcript = alternatives[0].transcript
+                    is_final = result.is_final if hasattr(result, 'is_final') else True
 
-            transcript = alternatives[0].transcript
-            is_final = bool(result.is_final)
+                    if transcript:
+                        logger.info(f"Session {self.session_id}: Transcription: '{transcript}' (final={is_final})")
 
-            if transcript:
-                logger.info(
-                    f"Session {self.session_id}: Transcription: '{transcript}' (final={is_final})"
-                )
+                        if self.websocket and self.loop:
+                            asyncio.run_coroutine_threadsafe(
+                                self.websocket.send_json({
+                                    "type": "transcription",
+                                    "text": transcript,
+                                    "is_final": is_final
+                                }),
+                                self.loop
+                            )
 
-                if self.websocket and self.loop:
-                    asyncio.run_coroutine_threadsafe(
-                        self.websocket.send_json({
-                            "type": "transcription",
-                            "text": transcript,
-                            "is_final": is_final
-                        }),
-                        self.loop
-                    )
-
-                if transcript.strip():
-                    self.current_transcription = transcript
-                    self.pending_transcript = transcript
-                    self._schedule_transcript_flush()
+                        if transcript.strip():
+                            self.current_transcription = transcript
+                            self.pending_transcript = transcript
+                            self._schedule_transcript_flush()
 
         except Exception as e:
             logger.error(f"Session {self.session_id}: Error processing transcript: {e}", exc_info=True)
@@ -324,7 +324,7 @@ class NegotiationSession:
             if not self.received_audio:
                 logger.info(f"Session {self.session_id}: Received audio bytes ({len(audio_data)})")
                 self.received_audio = True
-            await self.dg_connection.send_media(audio_data)
+            self.dg_connection.send(audio_data)
 
     def _is_acceptance(self, text: str) -> bool:
         lowered = text.lower().strip()
@@ -371,12 +371,8 @@ class NegotiationSession:
 
     async def cleanup(self):
         """Clean up session resources"""
-        if self.dg_task:
-            self.dg_task.cancel()
-            self.dg_task = None
-        if self.dg_connection_ctx:
-            await self.dg_connection_ctx.__aexit__(None, None, None)
-            self.dg_connection_ctx = None
+        if self.dg_connection:
+            self.dg_connection.finish()
         self.dg_connection = None
         self.dg_connected = False
         logger.info(f"Session {self.session_id}: Cleaned up")

@@ -29,11 +29,8 @@ from pydantic import BaseModel
 from supabase import create_client, Client
 from app.core.config import settings
 from agents.scenario_agent.scenario import generate_scenario
-from deepgram import DeepgramClient
-from deepgram.core.events import EventType
-from deepgram.listen.v1.raw_client import AsyncRawV1Client
-from deepgram.listen.v1.socket_client import AsyncV1SocketClient
-from deepgram.listen.v1.types.listen_v1results import ListenV1Results
+from deepgram import DeepgramClient, DeepgramClientOptions, LiveOptions
+from deepgram.clients.live.v1 import LiveTranscriptionEvents
 try:
     from cartesia import Cartesia
 except ImportError:
@@ -91,19 +88,17 @@ class NegotiationSession:
 
         # Deepgram client for STT
         try:
-            self.deepgram = DeepgramClient(api_key=os.getenv("DEEPGRAM_API_KEY"))
-            self.dg_raw_client = AsyncRawV1Client(client_wrapper=self.deepgram._client_wrapper)
-            self.dg_connection: Optional[AsyncV1SocketClient] = None
-            self.dg_connection_ctx = None
-            self.dg_task: Optional[asyncio.Task] = None
+            config = DeepgramClientOptions(
+                api_key=os.getenv("DEEPGRAM_API_KEY"),
+                options={"ssl_verify": False}
+            )
+            self.deepgram = DeepgramClient("", config)
+            self.dg_connection = None
             self.dg_connected = False
         except Exception as e:
             logger.error(f"Failed to initialize Deepgram: {e}")
             self.deepgram = None
-            self.dg_raw_client = None
             self.dg_connection = None
-            self.dg_connection_ctx = None
-            self.dg_task = None
             self.dg_connected = False
 
         # Cartesia client for TTS
@@ -145,34 +140,41 @@ class NegotiationSession:
                 "i'll go with,i would take,i can take"
             ).split(",") if p.strip()
         ]
+        self.closed = False
 
         logger.info(f"Created negotiation session {session_id}")
 
     async def connect_deepgram(self):
         """Establish connection to Deepgram for live transcription"""
         try:
-            if not self.deepgram or not self.dg_raw_client:
+            if not self.deepgram:
                 return False
 
-            logger.info(f"Session {self.session_id}: Starting Deepgram connection...")
-
-            self.dg_connection_ctx = self.dg_raw_client.connect(
+            options = LiveOptions(
                 model="nova-2",
                 language="en-US",
                 encoding="linear16",
-                sample_rate="16000",
-                channels="1",
-                interim_results="true",
-                endpointing="5000",
+                sample_rate=16000,
+                channels=1,
+                interim_results=True,
+                endpointing=5000,
             )
-            self.dg_connection = await self.dg_connection_ctx.__aenter__()
 
-            self.dg_connection.on(EventType.OPEN, self.on_deepgram_open)
-            self.dg_connection.on(EventType.MESSAGE, self.on_deepgram_message)
-            self.dg_connection.on(EventType.ERROR, self.on_deepgram_error)
-            self.dg_connection.on(EventType.CLOSE, self.on_deepgram_close)
+            logger.info(f"Session {self.session_id}: Starting Deepgram connection...")
 
-            self.dg_task = asyncio.create_task(self.dg_connection.start_listening())
+            self.dg_connection = self.deepgram.listen.websocket.v("1")
+
+            self.dg_connection.on(LiveTranscriptionEvents.Open, self.on_deepgram_open)
+            self.dg_connection.on(LiveTranscriptionEvents.Transcript, self.on_deepgram_message)
+            self.dg_connection.on(LiveTranscriptionEvents.UtteranceEnd, self.on_utterance_end)
+            self.dg_connection.on(LiveTranscriptionEvents.Error, self.on_deepgram_error)
+            self.dg_connection.on(LiveTranscriptionEvents.Close, self.on_deepgram_close)
+
+            result = self.dg_connection.start(options)
+            if not result:
+                logger.error(f"Session {self.session_id}: Failed to start Deepgram connection")
+                return False
+
             self.dg_connected = True
             logger.info(f"Session {self.session_id}: Deepgram connection established")
             return True
@@ -181,38 +183,54 @@ class NegotiationSession:
             logger.error(f"Session {self.session_id}: Deepgram connection error: {e}")
             return False
 
-    def on_deepgram_message(self, result: object):
+    def on_deepgram_message(self, *args, **kwargs):
         """Handle transcription messages from Deepgram"""
         try:
-            if not isinstance(result, ListenV1Results):
+            result = kwargs.get("result")
+            if not result:
+                logger.warning(f"Session {self.session_id}: No result in Deepgram callback")
                 return
 
-            alternatives = result.channel.alternatives
-            if not alternatives:
-                return
+            if hasattr(result, 'channel'):
+                alternatives = result.channel.alternatives
+                if alternatives and len(alternatives) > 0:
+                    transcript = alternatives[0].transcript
+                    is_final = result.is_final if hasattr(result, 'is_final') else True
 
-            transcript = alternatives[0].transcript
-            is_final = bool(result.is_final)
+                    if transcript:
+                        logger.info(f"Session {self.session_id}: Transcription: '{transcript}' (final={is_final})")
 
-            if transcript:
-                logger.info(
-                    f"Session {self.session_id}: Transcription: '{transcript}' (final={is_final})"
-                )
+                        if self.websocket and self.loop:
+                            asyncio.run_coroutine_threadsafe(
+                                self.websocket.send_json({
+                                    "type": "transcription",
+                                    "text": transcript,
+                                    "is_final": is_final
+                                }),
+                                self.loop
+                            )
 
-                if self.websocket and self.loop:
-                    asyncio.run_coroutine_threadsafe(
-                        self.websocket.send_json({
-                            "type": "transcription",
-                            "text": transcript,
-                            "is_final": is_final
-                        }),
-                        self.loop
-                    )
-
-                if transcript.strip():
-                    self.current_transcription = transcript
-                    self.pending_transcript = transcript
-                    self._schedule_transcript_flush()
+                        if transcript.strip():
+                            self.current_transcription = transcript
+                            self.pending_transcript = transcript
+                            self._schedule_transcript_flush()
+            elif hasattr(result, "transcript"):
+                transcript = result.transcript
+                if transcript:
+                    logger.info(f"Session {self.session_id}: Transcription: '{transcript}' (alt)")
+                    if self.websocket and self.loop:
+                        asyncio.run_coroutine_threadsafe(
+                            self.websocket.send_json({
+                                "type": "transcription",
+                                "text": transcript,
+                                "is_final": True
+                            }),
+                            self.loop
+                        )
+                    if transcript.strip():
+                        self.current_transcription = transcript
+                        self.pending_transcript = transcript
+                        self._schedule_transcript_flush()
 
         except Exception as e:
             logger.error(f"Session {self.session_id}: Error processing transcript: {e}", exc_info=True)
@@ -245,6 +263,30 @@ class NegotiationSession:
         logger.error(f"Session {self.session_id}: Deepgram error: {error}")
         self.dg_connected = False
         self.dg_connection = None
+
+    def _is_deal_closed(self, opponent_response: str) -> bool:
+        """Check if opponent's response indicates deal has been closed."""
+        lowered = opponent_response.lower()
+        # Phrases indicating opponent is closing the deal
+        closing_phrases = [
+            "we have a deal",
+            "we've got a deal",
+            "we got a deal",
+            "deal is done",
+            "it's a deal",
+            "that's a deal",
+            "shake on it",
+            "i'll get the paperwork",
+            "i'll draw up the",
+            "i'll send over the",
+            "pleasure doing business",
+            "look forward to working",
+            "welcome aboard",
+            "congratulations",
+            "let's finalize",
+            "we're all set",
+        ]
+        return any(phrase in lowered for phrase in closing_phrases)
 
     async def process_user_message(self, user_text: str):
         """Process user's message through opponent and coach agents"""
@@ -340,8 +382,8 @@ class NegotiationSession:
     async def generate_and_stream_audio(self, text: str):
         """Generate TTS audio and stream to frontend using Cartesia"""
         try:
-            if not self.cartesia_client and not os.getenv("CARTESIA_API_KEY"):
-                logger.warning(f"Session {self.session_id}: TTS disabled - skipping audio generation")
+            if not os.getenv("CARTESIA_API_KEY"):
+                logger.warning(f"Session {self.session_id}: TTS disabled - no API key")
                 return
 
             # Reset cancellation flag at the start of new TTS
@@ -363,28 +405,45 @@ class NegotiationSession:
                 "sample_rate": 44100,
             }
 
-            # Stream audio chunks using SSE
-            # Cartesia SDK returns dict with 'audio' key containing bytes
-            for chunk in self.cartesia_client.tts.sse(
-                model_id="sonic-3",
-                transcript=text,
-                voice_id=voice_id,
-                output_format=output_format,
-            ):
-                # Check if barge-in occurred
-                if self.is_tts_cancelled:
-                    logger.info(f"Session {self.session_id}: TTS cancelled due to barge-in")
-                    break
+            # Use SDK if available, otherwise fall back to HTTP
+            if self.cartesia_client:
+                # Stream audio chunks using Cartesia SDK
+                for chunk in self.cartesia_client.tts.sse(
+                    model_id="sonic-3",
+                    transcript=text,
+                    voice_id=voice_id,
+                    output_format=output_format,
+                ):
+                    # Check if barge-in occurred
+                    if self.is_tts_cancelled:
+                        logger.info(f"Session {self.session_id}: TTS cancelled due to barge-in")
+                        break
 
-                audio_bytes = chunk.get("audio") if isinstance(chunk, dict) else chunk
-                if audio_bytes:
-                    audio_base64 = base64.b64encode(audio_bytes).decode()
-                    await self.websocket.send_json({
-                        "type": "audio_chunk",
-                        "data": audio_base64,
-                        "sample_rate": 44100,
-                        "encoding": "pcm_s16le"
-                    })
+                    audio_bytes = chunk.get("audio") if isinstance(chunk, dict) else chunk
+                    if audio_bytes:
+                        audio_base64 = base64.b64encode(audio_bytes).decode()
+                        await self.websocket.send_json({
+                            "type": "audio_chunk",
+                            "data": audio_base64,
+                            "sample_rate": 44100,
+                            "encoding": "pcm_s16le"
+                        })
+            else:
+                # Fall back to HTTP SSE stream
+                async for audio_bytes in self._cartesia_sse_stream(text, tts_model, voice_id, output_format):
+                    # Check if barge-in occurred
+                    if self.is_tts_cancelled:
+                        logger.info(f"Session {self.session_id}: TTS cancelled due to barge-in")
+                        break
+
+                    if audio_bytes:
+                        audio_base64 = base64.b64encode(audio_bytes).decode()
+                        await self.websocket.send_json({
+                            "type": "audio_chunk",
+                            "data": audio_base64,
+                            "sample_rate": 44100,
+                            "encoding": "pcm_s16le"
+                        })
 
             # Notify frontend that audio is complete (even if cancelled)
             await self.websocket.send_json({
@@ -460,7 +519,7 @@ class NegotiationSession:
             if not self.received_audio:
                 logger.info(f"Session {self.session_id}: Received audio bytes ({len(audio_data)})")
                 self.received_audio = True
-            await self.dg_connection.send_media(audio_data)
+            self.dg_connection.send(audio_data)
 
     def _is_acceptance(self, text: str) -> bool:
         lowered = text.lower().strip()
@@ -516,14 +575,11 @@ class NegotiationSession:
 
     async def cleanup(self):
         """Clean up session resources"""
-        if self.dg_task:
-            self.dg_task.cancel()
-            self.dg_task = None
-        if self.dg_connection_ctx:
-            await self.dg_connection_ctx.__aexit__(None, None, None)
-            self.dg_connection_ctx = None
+        if self.dg_connection:
+            self.dg_connection.finish()
         self.dg_connection = None
         self.dg_connected = False
+        self.closed = True
         logger.info(f"Session {self.session_id}: Cleaned up")
 
 

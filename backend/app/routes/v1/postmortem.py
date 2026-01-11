@@ -32,11 +32,12 @@ _analysis_store: Dict[str, Dict] = {}
 def get_supabase_client():
     """Initialize Supabase client for post-mortem storage."""
     from app.core.config import settings
-    if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
+    supabase_key = settings.SUPABASE_SERVICE_ROLE_KEY or settings.SUPABASE_API_KEY
+    if not settings.SUPABASE_URL or not supabase_key:
         return None
     try:
         from supabase import create_client
-        return create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+        return create_client(settings.SUPABASE_URL, supabase_key)
     except Exception as e:
         logger.warning(f"Supabase client unavailable: {e}")
         return None

@@ -33,6 +33,17 @@ export type PostMortemResult = {
   keyMoments: PostMortemMoment[];
 };
 
+export type VideoSession = {
+  session_id: string;
+  created_at: string;
+};
+
+export type VideoLink = {
+  id: string;
+  link: string;
+  created_at?: string;
+};
+
 const DEFAULT_API_BASE = "http://localhost:8000";
 
 const getApiBaseUrl = () =>
@@ -58,6 +69,32 @@ export async function createScenarioContext(keywords: string) {
   }
 
   return (await response.json()) as ScenarioContext;
+}
+
+export async function createVideoSession(link: string) {
+  const response = await fetch(`${getApiBaseUrl()}/videos/session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ link }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Video session request failed");
+  }
+
+  return (await response.json()) as VideoSession;
+}
+
+export async function fetchVideoLinks() {
+  const response = await fetch(`${getApiBaseUrl()}/videos/links`, {
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error("Video links fetch failed");
+  }
+
+  return (await response.json()) as { videos: VideoLink[] };
 }
 
 export async function requestPostMortem(sessionId: string) {

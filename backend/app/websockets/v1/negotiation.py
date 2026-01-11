@@ -318,8 +318,8 @@ class NegotiationSession:
                 "type": "audio_start"
             })
 
-            # Cartesia voice ID - professional male voice
-            voice_id = os.getenv("CARTESIA_VOICE_ID", "a0e99841-438c-4a64-b679-ae501e7d6091")
+            # Cartesia voice ID - Ronald (Thinker)
+            voice_id = os.getenv("CARTESIA_VOICE_ID", "5ee9feff-1265-424a-9d7f-8e4d431a12c7")
             tts_model = os.getenv("CARTESIA_MODEL_ID", "sonic-3")
 
             # Output format for raw PCM audio (16-bit signed, little-endian)

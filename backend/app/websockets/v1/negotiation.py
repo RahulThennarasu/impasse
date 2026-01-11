@@ -18,6 +18,8 @@ import os
 import base64
 import sys
 import httpx
+import uuid
+from datetime import datetime
 from typing import Dict, Optional, List
 
 # Add agents to path
@@ -35,6 +37,7 @@ except ImportError:
 
 from agents.op_agent.op import OpponentAgent
 from agents.coach_agent.coach import CoachAgent
+from app.routes.v1.postmortem import store_session_data
 
 logger = logging.getLogger(__name__)
 
@@ -262,9 +265,25 @@ class NegotiationSession:
         """Process user's message through opponent and coach agents"""
         try:
             if self._is_acceptance(user_text):
-                self.opponent.transcript.append({"role": "user", "content": user_text})
+                self.opponent.current_turn += 1
+                self.opponent.transcript.append({
+                    "role": "user",
+                    "content": user_text,
+                    "timestamp": datetime.now().isoformat(),
+                    "turn": self.opponent.current_turn
+                })
                 final_advice = self.coach.get_final_advice(self.opponent.transcript)
                 hidden_state = self.opponent.get_hidden_state()
+
+                # Store session data for post-mortem analysis
+                store_session_data(self.session_id, {
+                    "transcript": self.opponent.transcript,
+                    "opponent_config": self.scenario_data.get("opponent", {}),
+                    "coach_config": self.scenario_data.get("coach", {}),
+                    "hidden_state": hidden_state,
+                    "final_advice": final_advice,
+                })
+
                 await self.websocket.send_json({
                     "type": "negotiation_complete",
                     "final_advice": final_advice,
@@ -294,6 +313,16 @@ class NegotiationSession:
                 logger.info(f"Session {self.session_id}: Deal closed by opponent")
                 final_advice = self.coach.get_final_advice(self.opponent.transcript)
                 hidden_state = self.opponent.get_hidden_state()
+
+                # Store session data for post-mortem analysis
+                store_session_data(self.session_id, {
+                    "transcript": self.opponent.transcript,
+                    "opponent_config": self.scenario_data.get("opponent", {}),
+                    "coach_config": self.scenario_data.get("coach", {}),
+                    "hidden_state": hidden_state,
+                    "final_advice": final_advice,
+                })
+
                 await self.websocket.send_json({
                     "type": "negotiation_complete",
                     "final_advice": final_advice,
@@ -633,6 +662,15 @@ async def websocket_negotiation(websocket: WebSocket, session_id: str):
                     # Get final analysis from coach
                     final_advice = session.coach.get_final_advice(session.opponent.transcript)
                     hidden_state = session.opponent.get_hidden_state()
+
+                    # Store session data for post-mortem analysis
+                    store_session_data(session_id, {
+                        "transcript": session.opponent.transcript,
+                        "opponent_config": session.scenario_data.get("opponent", {}),
+                        "coach_config": session.scenario_data.get("coach", {}),
+                        "hidden_state": hidden_state,
+                        "final_advice": final_advice,
+                    })
 
                     await websocket.send_json({
                         "type": "negotiation_complete",
